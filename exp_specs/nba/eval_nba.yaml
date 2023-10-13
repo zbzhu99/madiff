@@ -1,0 +1,23 @@
+meta_data:
+  exp_name: "eval_nba"
+  script_path: "run_scripts/evaluate_nba.py"
+  num_workers: 1
+
+variables:
+  dataset: ["test"]
+  nba_eval_valid_samples: [1000]
+  log_dir: [
+    ""
+  ]
+  batch_idx: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+constants:
+  sample_times: 16
+  horizon: 20
+  history_horizon: 0
+  nba_hz: 5
+  load_steps: [800000]
+  evaluator: "utils.NBAEvaluator"
+  overwrite: False
+  use_history: False # modify this when using history !
+  batch_size: 100

@@ -1,0 +1,6 @@
+id-mava[reverb,tf]==0.1.3
+neptune-client==0.16.2
+tensorflow-io==0.27.0
+pandas
+seaborn
+wandb

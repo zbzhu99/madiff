@@ -1,0 +1,51 @@
+isort==5.12.0
+black==23.1.0
+Cython==0.29.21
+dm-control==1.0.8
+einops
+enum34==1.1.10
+gitdb==4.0.5
+GitPython==3.1.9
+glfw==1.12.0
+gtimer
+gym>=0.18
+gymnasium==0.27.1
+jaynes==0.8.11
+joblib==0.16.0
+matplotlib
+ml-logger==0.8.69
+mujoco==2.3.0
+mujoco-py<2.2,>=2.1
+numpy>=1.23.0
+opencv-python
+opt-einsum==3.1.0
+packaging==23.0
+pandas
+params-proto==2.9.6
+path==15.0.0
+pygame
+pyglet==1.5.0
+PyOpenGL==3.1.5
+pyparsing==2.2.2
+pyrsistent==0.16.0
+PySC2==3.0.0
+pytest==3.8.2
+python-dateutil==2.7.3
+python-utils==2.4.0
+PyYAML==6.0
+scikit-image==0.19.3
+scipy
+seaborn
+scikit-video==1.1.11
+subprocess32==3.5.4
+tensorboard==2.0.2
+tensorboardX==2.0
+tensorflow-estimator==2.0.0
+tqdm
+typed-argument-parser==1.7.2
+-e ./third_party/multiagent-particle-envs
+-e ./third_party/multiagent_mujoco
+-e ./third_party/ddpg-agent
+mjrl@git+https://github.com/aravindr93/mjrl@master#egg=mjrl
+D4RL@git+https://github.com/Farama-Foundation/d4rl@e840e80ec4ed51bbb0e557e466198b5d1ae29a15
+-e .

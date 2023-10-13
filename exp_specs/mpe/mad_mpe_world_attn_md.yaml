@@ -1,0 +1,80 @@
+meta_data:
+  exp_name: "mad_mpe"
+  script_path: "run_scripts/train.py"
+  num_workers: 3
+  job_name: "{dataset}/h_{horizon}-{model}-r_{returns_scale}-guidew_{condition_guidance_w}-dl_{loader}-retcond_{returns_condition}"
+
+variables:
+  seed: [100, 200, 300, 400, 500]
+
+  horizon: [24]
+  returns_scale: [600]
+  dataset: ["simple_world-medium"]
+  condition_guidance_w: [1.2]
+
+constants:
+  # misc
+  seed: 100
+  env_type: "mpe"
+  n_agents: 3
+  use_action: True
+
+  # model
+  model: "models.SharedConvAttentionDeconv"
+  diffusion: "models.GaussianInvDynDiffusion"
+  ego_only_inv: False
+  share_inv: True
+  history_horizon: 0
+  n_diffusion_steps: 200
+  action_weight: 10
+  loss_weights: null
+  loss_discount: 1
+  dim_mults: [1, 4, 8]
+  returns_condition: True
+  predict_epsilon: True
+  calc_energy: False
+  dim: 128
+  hidden_dim: 256
+  condition_dropout: 0.25
+  condition_guidance_w: 1.2
+  ar_inv: False
+  train_only_inv: False
+  clip_denoised: True
+  test_ret: 0.9
+  agent_share_noise: False
+  renderer: "utils.MPERenderer"
+
+  # dataset
+  loader: "datasets.SequenceDataset"
+  normalizer: "CDFNormalizer"
+  max_n_episodes: 200000
+  preprocess_fns: []
+  use_padding: True
+  include_returns: True
+  discount: 0.99
+  max_path_length: 25
+  termination_penalty: 0.0
+
+  # training
+  n_steps_per_epoch: 10000
+  loss_type: "l2"
+  n_train_steps: 1002000
+  batch_size: 32
+  learning_rate: 0.0002
+  gradient_accumulate_every: 2
+  ema_decay: 0.995
+  log_freq: 1000
+  save_freq: 50000
+  sample_freq: 10000
+  n_saves: 5
+  save_parallel: False
+  n_reference: 3
+  save_checkpoints: True
+
+  # eval
+  evaluator: "utils.MADEvaluator"
+  num_eval: 10
+  eval_freq: 0
+
+  # load checkpoint
+  continue_training: True

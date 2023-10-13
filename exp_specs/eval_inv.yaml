@@ -1,0 +1,18 @@
+meta_data:
+  exp_name: "eval_inv"
+  script_path: "run_scripts/evaluate.py"
+  num_workers: 2
+
+variables:
+  log_dir: [
+    "logs/mad_smac/3m-Good/h_20-hh_8-models.SharedConvAttentionDeconv-r_20-guidew_1.2-dl_datasets.HistoryCondSequenceDataset-retcond_True/100",
+    "logs/mad_smac/3m-Good/h_20-hh_8-models.SharedConvAttentionDeconv-r_20-guidew_1.2-dl_datasets.HistoryCondSequenceDataset-retcond_True/200",
+  ]
+
+constants:
+  load_steps: [0, 50000, 100000, 150000, 200000, 250000, 300000, 350000, 400000, 450000, 500000, 550000, 600000, 650000, 700000, 750000, 800000, 850000, 900000, 950000] # , 1000000]
+  num_eval: 10
+  num_envs: 10
+  evaluator: "utils.MADEvaluator"
+  overwrite: True
+  use_ddim_sample: False
