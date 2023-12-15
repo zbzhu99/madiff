@@ -1,14 +1,23 @@
+from typing import List
+
 import numpy as np
 
 
-def atleast_3d(x):
-    while x.ndim < 3:
+def atleast_nd(x, n: int):
+    while x.ndim < n:
         x = np.expand_dims(x, axis=-1)
     return x
 
 
 class ReplayBuffer:
-    def __init__(self, n_agents, max_n_episodes, max_path_length, termination_penalty):
+    def __init__(
+        self,
+        n_agents: int,
+        max_n_episodes: int,
+        max_path_length: int,
+        termination_penalty: float,
+        global_feats: List[str] = ["states"],
+    ):
         self._dict = {
             "path_lengths": np.zeros(max_n_episodes, dtype=int),
         }
@@ -17,6 +26,7 @@ class ReplayBuffer:
         self.max_n_episodes = max_n_episodes
         self.max_path_length = max_path_length
         self.termination_penalty = termination_penalty
+        self.global_feats = global_feats
 
     def __repr__(self):
         return "[ datasets/buffer ] Fields:\n" + "\n".join(
@@ -57,16 +67,19 @@ class ReplayBuffer:
     def _allocate(self, key, array):
         assert key not in self._dict
         dim = array.shape[-1]
-        shape = (self.max_n_episodes, self.max_path_length, self.n_agents, dim)
+        if len(array.shape) == 3:
+            shape = (self.max_n_episodes, self.max_path_length, self.n_agents, dim)
+        else:
+            assert len(array.shape) == 2, f"Invalid shape {array.shape} of {key}"
+            shape = (self.max_n_episodes, self.max_path_length, dim)
         self._dict[key] = np.zeros(shape, dtype=np.float32)
-        # print(f'[ utils/mujoco ] Allocated {key} with size {shape}')
 
     def add_path(self, path):
         # path[key] shape: (path_length, n_agents, dim)
         path_length = len(path["observations"])
         assert path_length <= self.max_path_length
 
-        # NOTE: agents must terminate together
+        # NOTE(zbzhu): agents must terminate together
         all_terminals = np.any(path["terminals"], axis=1)
         if all_terminals.any():
             assert (all_terminals[-1] == True) and (not all_terminals[:-1].any())
@@ -76,14 +89,16 @@ class ReplayBuffer:
 
         # add tracked keys in path
         for key in self.keys:
-            array = atleast_3d(path[key])
+            if key in self.global_feats:  # all agents share the same global state
+                array = atleast_nd(path[key], n=2)
+            else:
+                array = atleast_nd(path[key], n=3)
             if key not in self._dict:
                 self._allocate(key, array)
             self._dict[key][self._count, :path_length] = array
 
         # penalize early termination
         if all_terminals.any() and self.termination_penalty is not None:
-            # FIXME: check this assertion
             if "timeouts" in path:
                 assert not path[
                     "timeouts"

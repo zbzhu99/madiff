@@ -1,14 +1,14 @@
 import argparse
 import os
 
-import yaml
-
 import diffuser.utils as utils
+import yaml
 from diffuser.utils.launcher_util import build_config_from_dict
 
 
 def evaluate(Config):
     evaluator = None
+    Config.condition_guidance_w = getattr(Config, "condition_guidance_w", None)
 
     for load_step in Config.load_steps:
         ckpt_file_path = os.path.join(
@@ -24,6 +24,10 @@ def evaluate(Config):
             if getattr(Config, "use_ddim_sample", False)
             else f"results/step_{load_step}-ep_{Config.num_eval}.json",
         )
+        if Config.condition_guidance_w is not None:
+            results_file_path = results_file_path.replace(
+                ".json", f"-cg_{Config.condition_guidance_w}.json"
+            )
         if not Config.overwrite and os.path.exists(results_file_path):
             print(
                 f"Results file {results_file_path} already exist. Skipping evaluation."
@@ -37,6 +41,7 @@ def evaluate(Config):
                 log_dir=Config.log_dir,
                 num_eval=Config.num_eval,
                 num_envs=getattr(Config, "num_envs", Config.num_eval),
+                condition_guidance_w=Config.condition_guidance_w,
             )
 
         evaluator.evaluate(load_step=load_step)

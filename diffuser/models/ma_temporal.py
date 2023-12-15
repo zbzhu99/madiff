@@ -1,4 +1,3 @@
-from copy import copy
 from typing import Tuple
 
 import einops
@@ -8,12 +7,12 @@ from torch.distributions import Bernoulli
 
 from .helpers import MlpSelfAttention, SelfAttention
 from .temporal import (
-    Conv1dBlock,
     Downsample1d,
     ResidualTemporalBlock,
     SinusoidalPosEmb,
     TemporalMlpBlock,
-    Upsample1d,
+    TemporalSelfAttention,
+    TemporalUnet,
 )
 
 
@@ -24,211 +23,301 @@ class ConvAttentionDeconv(nn.Module):
         self,
         horizon: int,
         transition_dim: int,
-        cond_dim: int,
+        state_dim: int,
         dim: int = 128,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
         n_agents: int = 2,
+        use_state: bool = False,
         returns_condition: bool = False,
+        env_ts_condition: bool = False,
         condition_dropout: float = 0.1,
-        calc_energy: bool = False,
         kernel_size: int = 5,
+        residual_attn: bool = True,
+        use_layer_norm: bool = False,
+        max_path_length: int = 100,
     ):
         super().__init__()
 
         self.n_agents = n_agents
-        self.condition_dropout = condition_dropout
+        self.use_state = use_state
+
+        self.returns_condition = returns_condition
+        self.env_ts_condition = env_ts_condition
 
         dims = [transition_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
-        print(f"[ models/temporal ] Channel dimensions: {in_out}")
 
-        if calc_energy:
-            mish = False
-            act_fn = nn.SiLU()
-        else:
-            mish = True
-            act_fn = nn.Mish()
-
-        self.time_mlp = nn.ModuleList(
+        self.nets = nn.ModuleList(
             [
-                nn.Sequential(
-                    SinusoidalPosEmb(dim),
-                    nn.Linear(dim, dim * 4),
-                    act_fn,
-                    nn.Linear(dim * 4, dim),
+                TemporalUnet(
+                    horizon=horizon,
+                    transition_dim=transition_dim,
+                    dim=dim,
+                    dim_mults=dim_mults,
+                    returns_condition=returns_condition,
+                    env_ts_condition=env_ts_condition,
+                    condition_dropout=condition_dropout,
+                    max_path_length=max_path_length,
+                    kernel_size=kernel_size,
                 )
                 for _ in range(n_agents)
             ]
         )
 
-        self.returns_condition = returns_condition
-        self.condition_dropout = condition_dropout
-        self.calc_energy = calc_energy
-
-        if self.returns_condition:
-            self.returns_mlp = nn.ModuleList(
-                [
-                    nn.Sequential(
-                        nn.Linear(1, dim),
-                        act_fn,
-                        nn.Linear(dim, dim * 4),
-                        act_fn,
-                        nn.Linear(dim * 4, dim),
-                    )
-                    for _ in range(n_agents)
-                ]
+        if self.use_state:
+            self.state_net = TemporalUnet(
+                horizon=horizon,
+                transition_dim=state_dim,
+                dim=dim,
+                dim_mults=dim_mults,
+                returns_condition=returns_condition,
+                env_ts_condition=env_ts_condition,
+                condition_dropout=condition_dropout,
+                max_path_length=max_path_length,
+                kernel_size=kernel_size,
             )
 
-            self.mask_dist = Bernoulli(probs=1 - self.condition_dropout)
-            embed_dim = 2 * dim
-        else:
-            embed_dim = dim
-
-        self.downs = nn.ModuleList([nn.ModuleList([]) for _ in range(n_agents)])
-        self.ups = nn.ModuleList([nn.ModuleList([]) for _ in range(n_agents)])
-        num_resolutions = len(in_out)
-
-        print(in_out)
-        for ind, (dim_in, dim_out) in enumerate(in_out):
-            is_last = ind >= (num_resolutions - 1)
-
-            for i in range(n_agents):
-                self.downs[i].append(
-                    nn.ModuleList(
-                        [
-                            ResidualTemporalBlock(
-                                dim_in,
-                                dim_out,
-                                embed_dim=embed_dim,
-                                horizon=horizon,
-                                kernel_size=kernel_size,
-                                mish=mish,
-                            ),
-                            ResidualTemporalBlock(
-                                dim_out,
-                                dim_out,
-                                embed_dim=embed_dim,
-                                horizon=horizon,
-                                kernel_size=kernel_size,
-                                mish=mish,
-                            ),
-                            Downsample1d(dim_out) if not is_last else nn.Identity(),
-                        ]
-                    )
-                )
-
-            if not is_last:
-                horizon = horizon // 2
-
-        mid_dim = dims[-1]
-        self.mid_block1 = nn.ModuleList(
-            [
-                ResidualTemporalBlock(
-                    mid_dim,
-                    mid_dim,
-                    embed_dim=embed_dim,
-                    horizon=horizon,
-                    kernel_size=kernel_size,
-                    mish=mish,
-                )
-                for _ in range(n_agents)
-            ]
-        )
-        self.mid_block2 = nn.ModuleList(
-            [
-                ResidualTemporalBlock(
-                    mid_dim,
-                    mid_dim,
-                    embed_dim=embed_dim,
-                    horizon=horizon,
-                    kernel_size=kernel_size,
-                    mish=mish,
-                )
-                for _ in range(n_agents)
-            ]
-        )
-
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-            is_last = ind >= (num_resolutions - 1)
-
-            for i in range(n_agents):
-                self.ups[i].append(
-                    nn.ModuleList(
-                        [
-                            ResidualTemporalBlock(
-                                dim_out * 2,
-                                dim_in,
-                                embed_dim=embed_dim,
-                                horizon=horizon,
-                                kernel_size=kernel_size,
-                                mish=mish,
-                            ),
-                            ResidualTemporalBlock(
-                                dim_in,
-                                dim_in,
-                                embed_dim=embed_dim,
-                                horizon=horizon,
-                                kernel_size=kernel_size,
-                                mish=mish,
-                            ),
-                            Upsample1d(dim_in) if not is_last else nn.Identity(),
-                        ]
-                    )
-                )
-
-            if not is_last:
-                horizon = horizon * 2
-
-        self.final_conv = nn.ModuleList(
-            [
-                nn.Sequential(
-                    Conv1dBlock(dim, dim, kernel_size=kernel_size, mish=mish),
-                    nn.Conv1d(dim, transition_dim, 1),
-                )
-                for _ in range(n_agents)
-            ]
-        )
-
-        self.self_attn = [SelfAttention(in_out[-1][1], in_out[-1][1] // 16)]
+        self.self_attn = [
+            SelfAttention(
+                in_out[-1][1],
+                in_out[-1][1] // 16,
+                in_out[-1][1] // 4,
+                use_state=use_state,
+                residual=residual_attn,
+            )
+        ]
         for dims in reversed(in_out):
-            self.self_attn.append(SelfAttention(dims[1], dims[1] // 16))
+            self.self_attn.append(
+                SelfAttention(
+                    dims[1],
+                    dims[1] // 16,
+                    dims[1] // 4,
+                    use_state=use_state,
+                    residual=residual_attn,
+                )
+            )
         self.self_attn = nn.ModuleList(self.self_attn)
+
+        self.use_layer_norm = use_layer_norm
+        if self.use_layer_norm:
+            horizon_ = horizon
+            self.layer_norm = []
+            for dims in in_out:
+                self.layer_norm.append(nn.LayerNorm([dims[1], horizon_]))
+                horizon_ = horizon_ // 2
+            horizon_ = horizon_ * 2
+            self.layer_norm.append(nn.LayerNorm([in_out[-1][1], horizon_]))
+            self.layer_norm = list(reversed(self.layer_norm))
+            self.layer_norm = nn.ModuleList(self.layer_norm)
+
+            horizon_ = horizon
+            self.layer_norm_cat = []
+            for dims in in_out:
+                self.layer_norm_cat.append(nn.LayerNorm([dims[1] * 2, horizon_]))
+                horizon_ = horizon_ // 2
+            self.layer_norm_cat = list(reversed(self.layer_norm_cat))
+            self.layer_norm_cat = nn.ModuleList(self.layer_norm_cat)
 
     def forward(
         self,
         x,
         time,
         returns=None,
+        states=None,
+        env_timestep=None,
+        attention_masks=None,
+        use_dropout: bool = True,
+        force_dropout: bool = False,
+        **kwargs,
+    ):
+        if not self.use_state:
+            return self.forward_without_states(
+                x,
+                time,
+                returns,
+                env_timestep,
+                attention_masks,
+                use_dropout,
+                force_dropout,
+                **kwargs,
+            )
+        else:
+            return self.forward_with_states(
+                x,
+                states,
+                time,
+                returns,
+                env_timestep,
+                attention_masks,
+                use_dropout,
+                force_dropout,
+                **kwargs,
+            )
+
+    def forward_with_states(
+        self,
+        x,
+        states,
+        time,
+        returns=None,
+        env_timestep=None,
+        attention_masks=None,
         use_dropout: bool = True,
         force_dropout: bool = False,
         **kwargs,
     ):
         """
         x : [ batch x horizon x agent x transition ]
-        returns : [batch x horizon x agent]
+        returns : [ batch x horizon x agent ]
+        """
+
+        assert (
+            x.shape[2] == self.n_agents
+        ), f"Expected {self.n_agents} agents, but got samples with shape {x.shape}"
+        assert (
+            self.use_state and states is not None
+        ), f"{type(states)}, {self.use_state}"
+
+        x = einops.rearrange(x, "b t a f -> b a f t")
+        states = einops.rearrange(states, "b t f -> b f t")
+        x = [x[:, a_idx] for a_idx in range(x.shape[1])]  # a, b f t
+
+        t = [self.nets[i].time_mlp(time) for i in range(self.n_agents)]
+        state_t = self.state_net.time_mlp(time)
+        if self.returns_condition:
+            assert returns is not None
+            returns_embed = [
+                self.nets[i].returns_mlp(returns[:, :, i]) for i in range(self.n_agents)
+            ]
+            state_returns_embed = self.state_net.returns_mlp(returns[:, :, 0])
+            if use_dropout:
+                # here use the same mask for all agents
+                mask = (
+                    self.nets[0]
+                    .mask_dist.sample(sample_shape=(returns_embed[0].size(0), 1))
+                    .to(returns_embed[0].device)
+                )
+                returns_embed = [
+                    returns_embed[i] * mask for i in range(len(returns_embed))
+                ]
+                state_returns_embed = mask * state_returns_embed
+            if force_dropout:
+                returns_embed = [
+                    returns_embed[i] * 0 for i in range(len(returns_embed))
+                ]
+                state_returns_embed = 0 * state_returns_embed
+
+            t = [torch.cat([t[i], returns_embed[i]], dim=-1) for i in range(len(t))]
+            state_t = torch.cat([state_t, state_returns_embed], dim=-1)
+
+        if self.env_ts_condition:
+            assert env_timestep is not None
+            env_ts_embed = [
+                self.nets[i].env_ts_mlp(env_timestep) for i in range(self.n_agents)
+            ]
+            state_env_ts_embed = self.state_net.returns_mlp(env_timestep)
+            t = [torch.cat([t[i], env_ts_embed[i]], dim=-1) for i in range(len(t))]
+            state_t = torch.cat([state_t, state_env_ts_embed], dim=-1)
+
+        """ Encoder Forward """
+        h = [[] for _ in range(self.n_agents)]
+        for layer_idx in range(len(self.nets[0].downs)):
+            for i in range(self.n_agents):
+                resnet, resnet2, downsample = self.nets[i].downs[layer_idx]
+                x[i] = resnet(x[i], t[i])
+                x[i] = resnet2(x[i], t[i])
+                h[i].append(x[i])
+                x[i] = downsample(x[i])
+        for i in range(self.n_agents):
+            x[i] = self.nets[i].mid_block1(x[i], t[i])
+            x[i] = self.nets[i].mid_block2(x[i], t[i])
+
+        """ State Encoder Forward """
+        state_h = []
+        for resnet, resnet2, downsample in self.state_net.downs:
+            states = resnet(states, state_t)
+            states = resnet2(states, state_t)
+            state_h.append(states)
+            states = downsample(states)
+        states = self.state_net.mid_block1(states, state_t)
+        states = self.state_net.mid_block2(states, state_t)
+
+        """ Attention """
+        x = torch.stack(x, dim=1)  # b a f t
+        x = self.self_attn[0](x, states=states)  # b a f t
+        x, states = x[:, :-1], x[:, -1]
+        x = [x[:, a_idx] for a_idx in range(x.shape[1])]  # a, b f t
+
+        """ Mixed Decoder Forward """
+        for layer_idx in range(len(self.nets[0].ups)):
+            """Skip-connection with Attention"""
+            hiddens = torch.stack([hid.pop() for hid in h], dim=1)  # b a f t
+            state_hiddens = state_h.pop()
+            hiddens = self.self_attn[layer_idx + 1](hiddens, states=state_hiddens)
+            hiddens, state_hiddens = hiddens[:, :-1], hiddens[:, -1]
+
+            """ Decoder Forward """
+            for i in range(self.n_agents):
+                resnet, resnet2, upsample = self.nets[i].ups[layer_idx]
+                x[i] = torch.cat((x[i], hiddens[:, i]), dim=1)
+                x[i] = resnet(x[i], t[i])
+                x[i] = resnet2(x[i], t[i])
+                x[i] = upsample(x[i])
+
+            """ State Decoder Forward """
+            state_resnet, state_resnet2, state_upsample = self.state_net.ups[layer_idx]
+            states = torch.cat((states, state_hiddens), dim=1)
+            states = state_resnet(states, state_t)
+            states = state_resnet2(states, state_t)
+            states = state_upsample(states)
+
+        for i in range(self.n_agents):
+            x[i] = self.nets[i].final_conv(x[i])
+        states = self.state_net.final_conv(states)
+
+        x = torch.stack(x, dim=1)
+        x = einops.rearrange(x, "b a f t -> b t a f")
+        states = einops.rearrange(states, "b f t -> b t f")
+
+        return x, states
+
+    def forward_without_states(
+        self,
+        x,
+        time,
+        returns=None,
+        env_timestep=None,
+        attention_masks=None,
+        use_dropout: bool = True,
+        force_dropout: bool = False,
+        **kwargs,
+    ):
+        """
+        x : [ batch x horizon x agent x transition ]
+        returns : [ batch x horizon x agent ]
         """
 
         assert (
             x.shape[2] == self.n_agents
         ), f"Expected {self.n_agents} agents, but got samples with shape {x.shape}"
 
-        if self.calc_energy:
-            x_inp = copy(x)
         x = einops.rearrange(x, "b t a f -> b a f t")
         x = [x[:, a_idx] for a_idx in range(x.shape[1])]  # a, b f t
 
-        t = [self.time_mlp[i](time) for i in range(self.n_agents)]
+        t = [self.nets[i].time_mlp(time) for i in range(self.n_agents)]
 
         if self.returns_condition:
             assert returns is not None
             returns_embed = [
-                self.returns_mlp[i](returns[:, :, i]) for i in range(self.n_agents)
+                self.nets[i].returns_mlp(returns[:, :, i]) for i in range(self.n_agents)
             ]
             if use_dropout:
                 # here use the same mask for all agents
-                mask = self.mask_dist.sample(
-                    sample_shape=(returns_embed[0].size(0), 1)
-                ).to(returns_embed[0].device)
+                mask = (
+                    self.nets[0]
+                    .mask_dist.sample(sample_shape=(returns_embed[0].size(0), 1))
+                    .to(returns_embed[0].device)
+                )
                 returns_embed = [
                     returns_embed[i] * mask for i in range(len(returns_embed))
                 ]
@@ -239,46 +328,53 @@ class ConvAttentionDeconv(nn.Module):
 
             t = [torch.cat([t[i], returns_embed[i]], dim=-1) for i in range(len(t))]
 
+        if self.env_ts_condition:
+            assert env_timestep is not None
+            env_ts_embed = [
+                self.nets[i].env_ts_mlp(env_timestep) for i in range(self.n_agents)
+            ]
+            t = [torch.cat([t[i], env_ts_embed[i]], dim=-1) for i in range(len(t))]
+
         h = [[] for _ in range(self.n_agents)]
 
-        for layer_idx in range(len(self.downs[0])):
+        for layer_idx in range(len(self.nets[0].downs)):
             for i in range(self.n_agents):
-                resnet, resnet2, downsample = self.downs[i][layer_idx]
+                resnet, resnet2, downsample = self.nets[i].downs[layer_idx]
                 x[i] = resnet(x[i], t[i])
                 x[i] = resnet2(x[i], t[i])
                 h[i].append(x[i])
                 x[i] = downsample(x[i])
 
         for i in range(self.n_agents):
-            x[i] = self.mid_block1[i](x[i], t[i])
-            x[i] = self.mid_block2[i](x[i], t[i])
+            x[i] = self.nets[i].mid_block1(x[i], t[i])
+            x[i] = self.nets[i].mid_block2(x[i], t[i])
 
         x = self.self_attn[0](torch.stack(x, dim=1))  # b a f t
+        if self.use_layer_norm:
+            x = self.layer_norm[0](x)
         x = [x[:, a_idx] for a_idx in range(x.shape[1])]  # a, b f t
 
-        for layer_idx in range(len(self.ups[0])):
+        for layer_idx in range(len(self.nets[0].ups)):
             hiddens = torch.stack([hid.pop() for hid in h], dim=1)  # b a f t
+            if self.use_layer_norm:
+                hiddens = self.layer_norm[layer_idx + 1](hiddens)
             hiddens = self.self_attn[layer_idx + 1](hiddens)
             for i in range(self.n_agents):
-                resnet, resnet2, upsample = self.ups[i][layer_idx]
+                resnet, resnet2, upsample = self.nets[i].ups[layer_idx]
                 x[i] = torch.cat((x[i], hiddens[:, i]), dim=1)
+                if self.use_layer_norm:
+                    x[i] = self.layer_norm_cat[layer_idx](x[i])
                 x[i] = resnet(x[i], t[i])
                 x[i] = resnet2(x[i], t[i])
                 x[i] = upsample(x[i])
 
         for i in range(self.n_agents):
-            x[i] = self.final_conv[i](x[i])
+            x[i] = self.nets[i].final_conv(x[i])
 
         x = torch.stack(x, dim=1)
         x = einops.rearrange(x, "b a f t -> b t a f")
 
-        if self.calc_energy:
-            # Energy function
-            energy = ((x - x_inp) ** 2).mean()
-            grad = torch.autograd.grad(outputs=energy, inputs=x_inp, create_graph=True)
-            return grad[0]
-        else:
-            return x
+        return x
 
 
 class SharedConvAttentionDeconv(nn.Module):
@@ -288,235 +384,385 @@ class SharedConvAttentionDeconv(nn.Module):
         self,
         horizon: int,
         transition_dim: int,
-        cond_dim: int,
+        state_dim: int,
         dim: int = 128,
+        history_horizon: int = 0,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
         nhead: int = 4,
         n_agents: int = 2,
-        use_attention: bool = True,
+        use_state: bool = False,
         returns_condition: bool = False,
+        env_ts_condition: bool = False,
         condition_dropout: float = 0.1,
-        calc_energy: bool = False,
         kernel_size: int = 5,
+        residual_attn: bool = True,
+        use_layer_norm: bool = False,
+        max_path_length: int = 100,
+        use_temporal_attention: bool = False,
     ):
         super().__init__()
 
         self.n_agents = n_agents
-        self.use_attention = use_attention
+        self.use_state = use_state
+        self.history_horizon = history_horizon
+        self.use_temporal_attention = use_temporal_attention
 
-        self.condition_dropout = condition_dropout
+        self.returns_condition = returns_condition
+        self.env_ts_condition = env_ts_condition
 
         dims = [transition_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
         print(f"[ models/temporal ] Channel dimensions: {in_out}")
 
-        if calc_energy:
-            mish = False
-            act_fn = nn.SiLU()
-        else:
-            mish = True
-            act_fn = nn.Mish()
-
-        self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(dim),
-            nn.Linear(dim, dim * 4),
-            act_fn,
-            nn.Linear(dim * 4, dim),
-        )
-
-        self.returns_condition = returns_condition
-        self.condition_dropout = condition_dropout
-        self.calc_energy = calc_energy
-
-        if self.returns_condition:
-            self.returns_mlp = nn.Sequential(
-                nn.Linear(1, dim),
-                act_fn,
-                nn.Linear(dim, dim * 4),
-                act_fn,
-                nn.Linear(dim * 4, dim),
-            )
-            self.mask_dist = Bernoulli(probs=1 - self.condition_dropout)
-            embed_dim = 2 * dim
-        else:
-            embed_dim = dim
-
-        self.downs = nn.ModuleList([])
-        self.ups = nn.ModuleList([])
-        num_resolutions = len(in_out)
-
-        for ind, (dim_in, dim_out) in enumerate(in_out):
-            is_last = ind >= (num_resolutions - 1)
-
-            self.downs.append(
-                nn.ModuleList(
-                    [
-                        ResidualTemporalBlock(
-                            dim_in,
-                            dim_out,
-                            embed_dim=embed_dim,
-                            horizon=horizon,
-                            kernel_size=kernel_size,
-                            mish=mish,
-                        ),
-                        ResidualTemporalBlock(
-                            dim_out,
-                            dim_out,
-                            embed_dim=embed_dim,
-                            horizon=horizon,
-                            kernel_size=kernel_size,
-                            mish=mish,
-                        ),
-                        Downsample1d(dim_out) if not is_last else nn.Identity(),
-                    ]
-                )
-            )
-
-            if not is_last:
-                horizon = horizon // 2
-
-        mid_dim = dims[-1]
-        self.mid_block1 = ResidualTemporalBlock(
-            mid_dim,
-            mid_dim,
-            embed_dim=embed_dim,
+        self.net = TemporalUnet(
             horizon=horizon,
+            history_horizon=history_horizon,
+            transition_dim=transition_dim,
+            dim=dim,
+            dim_mults=dim_mults,
+            returns_condition=returns_condition,
+            env_ts_condition=env_ts_condition,
+            condition_dropout=condition_dropout,
+            max_path_length=max_path_length,
             kernel_size=kernel_size,
-            mish=mish,
-        )
-        self.mid_block2 = ResidualTemporalBlock(
-            mid_dim,
-            mid_dim,
-            embed_dim=embed_dim,
-            horizon=horizon,
-            kernel_size=kernel_size,
-            mish=mish,
         )
 
-        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
-            is_last = ind >= (num_resolutions - 1)
-
-            self.ups.append(
-                nn.ModuleList(
-                    [
-                        ResidualTemporalBlock(
-                            dim_out * 2,
-                            dim_in,
-                            embed_dim=embed_dim,
-                            horizon=horizon,
-                            kernel_size=kernel_size,
-                            mish=mish,
-                        ),
-                        ResidualTemporalBlock(
-                            dim_in,
-                            dim_in,
-                            embed_dim=embed_dim,
-                            horizon=horizon,
-                            kernel_size=kernel_size,
-                            mish=mish,
-                        ),
-                        Upsample1d(dim_in) if not is_last else nn.Identity(),
-                    ]
-                )
+        if self.use_state:
+            self.state_net = TemporalUnet(
+                horizon=horizon,
+                history_horizon=history_horizon,
+                transition_dim=state_dim,
+                dim=dim,
+                dim_mults=dim_mults,
+                returns_condition=returns_condition,
+                env_ts_condition=env_ts_condition,
+                condition_dropout=condition_dropout,
+                max_path_length=max_path_length,
+                kernel_size=kernel_size,
             )
 
-            if not is_last:
-                horizon = horizon * 2
+        if self.use_temporal_attention:
+            print("\n USE TEMPORAL ATTENTION !!! \n")
+            AttentionModule = TemporalSelfAttention
 
-        self.final_conv = nn.Sequential(
-            Conv1dBlock(dim, dim, kernel_size=kernel_size, mish=mish),
-            nn.Conv1d(dim, transition_dim, 1),
-        )
-
-        self.self_attn = [SelfAttention(in_out[-1][1], in_out[-1][1] // 16)]
-        for dims in reversed(in_out):
-            self.self_attn.append(SelfAttention(dims[1], dims[1] // 16))
+            self.self_attn = [
+                AttentionModule(
+                    in_out[-1][1],
+                    in_out[-1][1] // 16,
+                    in_out[-1][1] // 4,
+                    residual=residual_attn,
+                    embed_dim=self.net.embed_dim,
+                )
+            ]
+            for dims in reversed(in_out):
+                self.self_attn.append(
+                    AttentionModule(
+                        dims[1],
+                        dims[1] // 16,
+                        dims[1] // 4,
+                        residual=residual_attn,
+                        embed_dim=self.net.embed_dim,
+                    )
+                )
+        else:
+            self.self_attn = [
+                SelfAttention(
+                    in_out[-1][1],
+                    in_out[-1][1] // 16,
+                    in_out[-1][1] // 4,
+                    use_state=use_state,
+                    residual=residual_attn,
+                )
+            ]
+            for dims in reversed(in_out):
+                self.self_attn.append(
+                    SelfAttention(
+                        dims[1],
+                        dims[1] // 16,
+                        dims[1] // 4,
+                        use_state=use_state,
+                        residual=residual_attn,
+                    )
+                )
         self.self_attn = nn.ModuleList(self.self_attn)
+
+        self.use_layer_norm = use_layer_norm
+        if self.use_layer_norm:
+            horizon_ = horizon
+            self.layer_norm = []
+            for dims in in_out:
+                self.layer_norm.append(nn.LayerNorm([dims[1], horizon_]))
+                horizon_ = horizon_ // 2
+            horizon_ = horizon_ * 2
+            self.layer_norm.append(nn.LayerNorm([in_out[-1][1], horizon_]))
+            self.layer_norm = list(reversed(self.layer_norm))
+            self.layer_norm = nn.ModuleList(self.layer_norm)
+
+            horizon_ = horizon
+            self.layer_norm_cat = []
+            for dims in in_out:
+                self.layer_norm_cat.append(nn.LayerNorm([dims[1] * 2, horizon_]))
+                horizon_ = horizon_ // 2
+            self.layer_norm_cat = list(reversed(self.layer_norm_cat))
+            self.layer_norm_cat = nn.ModuleList(self.layer_norm_cat)
 
     def forward(
         self,
         x,
         time,
         returns=None,
+        states=None,
+        env_timestep=None,
+        attention_masks=None,
+        use_dropout: bool = True,
+        force_dropout: bool = False,
+        **kwargs,
+    ):
+        if not self.use_state:
+            return self.forward_without_states(
+                x,
+                time,
+                returns,
+                env_timestep,
+                attention_masks,
+                use_dropout,
+                force_dropout,
+                **kwargs,
+            )
+        else:
+            return self.forward_with_states(
+                x,
+                states,
+                time,
+                returns,
+                env_timestep,
+                attention_masks,
+                use_dropout,
+                force_dropout,
+                **kwargs,
+            )
+
+    def forward_with_states(
+        self,
+        x,
+        states,
+        time,
+        returns=None,
+        env_timestep=None,
+        attention_masks=None,
         use_dropout: bool = True,
         force_dropout: bool = False,
         **kwargs,
     ):
         """
         x : [ batch x horizon x agent x transition ]
-        returns : [batch x horizon x agent]
+        states: [ batch x horizon x state_dim ]
+        returns : [ batch x horizon x agent ]
+        """
+
+        assert (
+            x.shape[2] == self.n_agents
+        ), f"Expected {self.n_agents} agents, but got samples with shape {x.shape}"
+        assert (
+            self.use_state and states is not None
+        ), f"{type(states)}, {self.use_state}"
+
+        x = einops.rearrange(x, "b t a f -> b a f t")
+        states = einops.rearrange(states, "b t f -> b f t")
+        bs = x.shape[0]
+
+        t = self.net.time_mlp(torch.stack([time for _ in range(x.shape[1])], dim=1))
+        state_t = self.state_net.time_mlp(time)
+        if self.returns_condition:
+            assert returns is not None
+            returns = einops.rearrange(returns, "b t a -> b a t")
+            returns_embed = self.net.returns_mlp(returns)
+            state_returns_embed = self.state_net.returns_mlp(returns[:, 0])
+            if use_dropout:
+                # here use the same mask for all agents
+                mask = self.net.mask_dist.sample(
+                    sample_shape=(returns_embed.size(0), returns_embed.size(1), 1)
+                ).to(returns_embed.device)
+                returns_embed = mask * returns_embed
+                state_returns_embed = mask[:, 0] * state_returns_embed
+            if force_dropout:
+                returns_embed = 0 * returns_embed
+                state_returns_embed = 0 * state_returns_embed
+            t = torch.cat([t, returns_embed], dim=-1)
+            state_t = torch.cat([state_t, state_returns_embed], dim=-1)
+
+        if self.env_ts_condition:
+            assert env_timestep is not None
+            # env_timestep = einops.repeat()
+
+        """ Encoder Forward """
+        h = []
+        x = x.reshape(x.shape[0] * x.shape[1], x.shape[2], x.shape[3])
+        t = t.reshape(t.shape[0] * t.shape[1], t.shape[2])
+        for resnet, resnet2, downsample in self.net.downs:
+            x = resnet(x, t)
+            x = resnet2(x, t)
+            h.append(x)
+            x = downsample(x)
+        x = self.net.mid_block1(x, t)
+        x = self.net.mid_block2(x, t)
+
+        """ State Encoder Forward """
+        state_h = []
+        for resnet, resnet2, downsample in self.state_net.downs:
+            states = resnet(states, state_t)
+            states = resnet2(states, state_t)
+            state_h.append(states)
+            states = downsample(states)
+        states = self.state_net.mid_block1(states, state_t)
+        states = self.state_net.mid_block2(states, state_t)
+
+        """ Attention """
+        x = x.reshape(bs, x.shape[0] // bs, x.shape[1], x.shape[2])
+        x = torch.cat((x, states.unsqueeze(1)), dim=1)
+        x = self.self_attn[0](x)  # b a f t
+        x, states = x[:, :-1], x[:, -1]
+
+        """ Mixed Decoder Forward """
+        x = x.reshape(x.shape[0] * x.shape[1], x.shape[2], x.shape[3])
+        for layer_idx in range(len(self.net.ups)):
+            """Skip-connection with Attention"""
+            hiddens = h.pop()
+            hiddens = hiddens.reshape(
+                bs, hiddens.shape[0] // bs, hiddens.shape[1], hiddens.shape[2]
+            )  # b a f t
+            state_hiddens = state_h.pop()
+            hiddens = torch.cat((hiddens, state_hiddens.unsqueeze(1)), dim=1)
+            hiddens = self.self_attn[layer_idx + 1](hiddens)
+            hiddens, state_hiddens = hiddens[:, :-1], hiddens[:, -1]
+            hiddens = hiddens.reshape(
+                hiddens.shape[0] * hiddens.shape[1], hiddens.shape[2], hiddens.shape[3]
+            )
+
+            """ Decoder Forward """
+            resnet, resnet2, upsample = self.net.ups[layer_idx]
+            x = torch.cat((x, hiddens), dim=1)
+            x = resnet(x, t)
+            x = resnet2(x, t)
+            x = upsample(x)
+
+            """ State Decoder Forward """
+            state_resnet, state_resnet2, state_upsample = self.state_net.ups[layer_idx]
+            states = torch.cat((states, state_hiddens), dim=1)
+            states = state_resnet(states, state_t)
+            states = state_resnet2(states, state_t)
+            states = state_upsample(states)
+
+        x = self.net.final_conv(x)
+        x = x.reshape(bs, x.shape[0] // bs, x.shape[1], x.shape[2])
+        states = self.state_net.final_conv(states)
+
+        x = einops.rearrange(x, "b a f t -> b t a f")
+        states = einops.rearrange(states, "b f t -> b t f")
+
+        return x, states
+
+    def forward_without_states(
+        self,
+        x,
+        time,
+        returns=None,
+        env_timestep=None,
+        attention_masks=None,
+        use_dropout: bool = True,
+        force_dropout: bool = False,
+        **kwargs,
+    ):
+        """
+        x : [ batch x horizon x agent x transition ]
+        returns : [ batch x horizon x agent ]
         """
 
         assert (
             x.shape[2] == self.n_agents
         ), f"Expected {self.n_agents} agents, but got samples with shape {x.shape}"
 
-        if self.calc_energy:
-            x_inp = copy(x)
         x = einops.rearrange(x, "b t a f -> b a f t")
         bs = x.shape[0]
 
-        t = self.time_mlp(torch.stack([time for _ in range(x.shape[1])], dim=1))
-
+        t = self.net.time_mlp(torch.stack([time for _ in range(x.shape[1])], dim=1))
         if self.returns_condition:
             assert returns is not None
             returns = einops.rearrange(returns, "b t a -> b a t")
-            returns_embed = self.returns_mlp(returns)
+            returns_embed = self.net.returns_mlp(returns)
             if use_dropout:
                 # here use the same mask for all agents
-                mask = self.mask_dist.sample(
+                mask = self.net.mask_dist.sample(
                     sample_shape=(returns_embed.size(0), returns_embed.size(1), 1)
                 ).to(returns_embed.device)
                 returns_embed = mask * returns_embed
             if force_dropout:
                 returns_embed = 0 * returns_embed
-
             t = torch.cat([t, returns_embed], dim=-1)
 
-        h = []
+        if self.env_ts_condition:
+            assert env_timestep is not None
+            env_timestep = env_timestep.to(dtype=torch.int64)
+            env_timestep = env_timestep[:, self.history_horizon]
+            env_ts_embed = self.net.env_ts_mlp(env_timestep)
+            env_ts_embed = einops.repeat(env_ts_embed, "b f -> b a f", a=x.shape[1])
+            t = torch.cat([t, env_ts_embed], dim=-1)
 
+        h = []
         x = x.reshape(x.shape[0] * x.shape[1], x.shape[2], x.shape[3])
         t = t.reshape(t.shape[0] * t.shape[1], t.shape[2])
-        for resnet, resnet2, downsample in self.downs:
+        for resnet, resnet2, downsample in self.net.downs:
             x = resnet(x, t)
             x = resnet2(x, t)
             h.append(x)
             x = downsample(x)
 
-        x = self.mid_block1(x, t)
-        x = self.mid_block2(x, t)
+        x = self.net.mid_block1(x, t)
+        x = self.net.mid_block2(x, t)
 
         x = x.reshape(bs, x.shape[0] // bs, x.shape[1], x.shape[2])
-        x = self.self_attn[0](x)  # b a f t
+        if self.use_layer_norm:
+            x = self.layer_norm[0](x)
+        if self.use_temporal_attention:
+            t = t.reshape(bs, t.shape[0] // bs, t.shape[1])
+            x = self.self_attn[0](x, t)  # b a f t
+            t = t.reshape(t.shape[0] * t.shape[1], t.shape[2])
+        else:
+            x = self.self_attn[0](x)  # b a f t
 
         x = x.reshape(x.shape[0] * x.shape[1], x.shape[2], x.shape[3])
-        for layer_idx in range(len(self.ups)):
+        for layer_idx in range(len(self.net.ups)):
             hiddens = h.pop()
             hiddens = hiddens.reshape(
                 bs, hiddens.shape[0] // bs, hiddens.shape[1], hiddens.shape[2]
             )
-            hiddens = self.self_attn[layer_idx + 1](hiddens)
+            if self.use_layer_norm:
+                hiddens = self.layer_norm[layer_idx + 1](hiddens)
+            if self.use_temporal_attention:
+                t = t.reshape(bs, t.shape[0] // bs, t.shape[1])
+                hiddens = self.self_attn[layer_idx + 1](hiddens, t)
+                t = t.reshape(t.shape[0] * t.shape[1], t.shape[2])
+            else:
+                hiddens = self.self_attn[layer_idx + 1](hiddens)
+
             hiddens = hiddens.reshape(
                 hiddens.shape[0] * hiddens.shape[1], hiddens.shape[2], hiddens.shape[3]
             )
-            resnet, resnet2, upsample = self.ups[layer_idx]
+            resnet, resnet2, upsample = self.net.ups[layer_idx]
             x = torch.cat((x, hiddens), dim=1)
+            if self.use_layer_norm:
+                x = self.layer_norm_cat[layer_idx](x)
+
             x = resnet(x, t)
             x = resnet2(x, t)
             x = upsample(x)
 
-        x = self.final_conv(x)
+        x = self.net.final_conv(x)
         x = x.reshape(bs, x.shape[0] // bs, x.shape[1], x.shape[2])
 
         x = einops.rearrange(x, "b a f t -> b t a f")
 
-        if self.calc_energy:
-            # Energy function
-            energy = ((x - x_inp) ** 2).mean()
-            grad = torch.autograd.grad(outputs=energy, inputs=x_inp, create_graph=True)
-            return grad[0]
-        else:
-            return x
+        return x
 
 
 class SharedAttentionAutoEncoder(nn.Module):
@@ -526,13 +772,11 @@ class SharedAttentionAutoEncoder(nn.Module):
         self,
         horizon: int,
         transition_dim: int,
-        cond_dim: int,
         dim: int = 128,
         dim_mults: Tuple[int] = (1, 2, 4),
         n_agents: int = 2,
         returns_condition: bool = False,
         condition_dropout: float = 0.1,
-        calc_energy: bool = False,
     ):
         assert (
             horizon == 1
@@ -546,10 +790,7 @@ class SharedAttentionAutoEncoder(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
         print(f"[ models/stationary ] Hidden dimensions: {in_out}")
 
-        if calc_energy:
-            act_fn = nn.SiLU()
-        else:
-            act_fn = nn.Mish()
+        act_fn = nn.Mish()
 
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(dim),
@@ -560,7 +801,6 @@ class SharedAttentionAutoEncoder(nn.Module):
 
         self.returns_condition = returns_condition
         self.condition_dropout = condition_dropout
-        self.calc_energy = calc_energy
 
         if self.returns_condition:
             self.returns_mlp = nn.Sequential(
@@ -626,9 +866,6 @@ class SharedAttentionAutoEncoder(nn.Module):
             x.shape[2] == self.n_agents
         ), f"Expected {self.n_agents} agents, but got samples with shape {x.shape}"
 
-        if self.calc_energy:
-            x_inp = copy(x)
-
         x = x.squeeze(1)  # b a f
         bs = x.shape[0]
 
@@ -675,13 +912,7 @@ class SharedAttentionAutoEncoder(nn.Module):
         x = self.final_mlp(x)
         x = x.reshape(bs, 1, x.shape[0] // bs, x.shape[1])
 
-        if self.calc_energy:
-            # Energy function
-            energy = ((x - x_inp) ** 2).mean()
-            grad = torch.autograd.grad(outputs=energy, inputs=x_inp, create_graph=True)
-            return grad[0]
-        else:
-            return x
+        return x
 
 
 class ConvAttentionTemporalValue(nn.Module):
@@ -691,7 +922,6 @@ class ConvAttentionTemporalValue(nn.Module):
         self,
         horizon,
         transition_dim,
-        cond_dim,
         n_agents,
         dim=32,
         dim_mults=(1, 2, 4, 8),
@@ -732,14 +962,12 @@ class ConvAttentionTemporalValue(nn.Module):
                                 dim_out,
                                 kernel_size=5,
                                 embed_dim=time_dim,
-                                horizon=horizon,
                             ),
                             ResidualTemporalBlock(
                                 dim_out,
                                 dim_out,
                                 kernel_size=5,
                                 embed_dim=time_dim,
-                                horizon=horizon,
                             ),
                             Downsample1d(dim_out) if not is_last else nn.Identity(),
                         ]
@@ -760,7 +988,6 @@ class ConvAttentionTemporalValue(nn.Module):
                     mid_dim_2,
                     kernel_size=5,
                     embed_dim=time_dim,
-                    horizon=horizon,
                 )
                 for _ in range(n_agents)
             ]
@@ -772,7 +999,6 @@ class ConvAttentionTemporalValue(nn.Module):
                     mid_dim_3,
                     kernel_size=5,
                     embed_dim=time_dim,
-                    horizon=horizon,
                 )
                 for _ in range(n_agents)
             ]
@@ -838,7 +1064,6 @@ class SharedConvAttentionTemporalValue(nn.Module):
         self,
         horizon,
         transition_dim,
-        cond_dim,
         n_agents,
         dim=32,
         dim_mults=(1, 2, 4, 8),
@@ -873,14 +1098,12 @@ class SharedConvAttentionTemporalValue(nn.Module):
                             dim_out,
                             kernel_size=5,
                             embed_dim=time_dim,
-                            horizon=horizon,
                         ),
                         ResidualTemporalBlock(
                             dim_out,
                             dim_out,
                             kernel_size=5,
                             embed_dim=time_dim,
-                            horizon=horizon,
                         ),
                         Downsample1d(dim_out) if not is_last else nn.Identity(),
                     ]
@@ -895,10 +1118,10 @@ class SharedConvAttentionTemporalValue(nn.Module):
         mid_dim_3 = mid_dim // 16
 
         self.mid_block1 = ResidualTemporalBlock(
-            mid_dim, mid_dim_2, kernel_size=5, embed_dim=time_dim, horizon=horizon
+            mid_dim, mid_dim_2, kernel_size=5, embed_dim=time_dim
         )
         self.mid_block2 = ResidualTemporalBlock(
-            mid_dim_2, mid_dim_3, kernel_size=5, embed_dim=time_dim, horizon=horizon
+            mid_dim_2, mid_dim_3, kernel_size=5, embed_dim=time_dim
         )
         fc_dim = mid_dim_3 * max(horizon, 1)
 
@@ -945,5 +1168,106 @@ class SharedConvAttentionTemporalValue(nn.Module):
         x = x.reshape(bs, -1)  # x.shape[0], x.shape[1], 1
         # take mean over agents
         out = x.mean(axis=1, keepdim=True)  # x.shape[0], 1
+
+        return out
+
+
+class ConcatTemporalValue(nn.Module):
+    agent_share_parameters = False
+
+    def __init__(
+        self,
+        horizon,
+        transition_dim,
+        n_agents,
+        dim=32,
+        dim_mults=(1, 2, 4, 8),
+        out_dim=1,
+    ):
+        super().__init__()
+
+        dims = [transition_dim * n_agents, *map(lambda m: dim * m, dim_mults)]
+        in_out = list(zip(dims[:-1], dims[1:]))
+
+        time_dim = dim
+        self.n_agents = n_agents
+        self.time_mlp = nn.Sequential(
+            SinusoidalPosEmb(dim),
+            nn.Linear(dim, dim * 4),
+            nn.Mish(),
+            nn.Linear(dim * 4, dim),
+        )
+
+        self.blocks = nn.ModuleList([])
+        num_resolutions = len(in_out)
+
+        print("ConvAttentionTemporalValue: ", in_out)
+        for ind, (dim_in, dim_out) in enumerate(in_out):
+            is_last = ind >= (num_resolutions - 1)
+
+            self.blocks.append(
+                nn.ModuleList(
+                    [
+                        ResidualTemporalBlock(
+                            dim_in,
+                            dim_out,
+                            kernel_size=5,
+                            embed_dim=time_dim,
+                        ),
+                        ResidualTemporalBlock(
+                            dim_out,
+                            dim_out,
+                            kernel_size=5,
+                            embed_dim=time_dim,
+                        ),
+                        Downsample1d(dim_out) if not is_last else nn.Identity(),
+                    ]
+                )
+            )
+
+            if not is_last:
+                horizon = horizon // 2
+
+        mid_dim = dims[-1]
+        mid_dim_2 = mid_dim // 4
+        mid_dim_3 = mid_dim // 16
+
+        self.mid_block1 = ResidualTemporalBlock(
+            mid_dim, mid_dim_2, kernel_size=5, embed_dim=time_dim
+        )
+        self.mid_block2 = ResidualTemporalBlock(
+            mid_dim_2, mid_dim_3, kernel_size=5, embed_dim=time_dim
+        )
+        fc_dim = mid_dim_3 * max(horizon, 1)
+
+        self.final_block = nn.Sequential(
+            nn.Linear(fc_dim + time_dim, fc_dim // 2),
+            nn.Mish(),
+            nn.Linear(fc_dim // 2, out_dim),
+        )
+
+    def forward(self, x, time, *args):
+        """
+        x : [ batch x horizon x n_agents x transition ]
+        """
+
+        assert (
+            x.shape[2] == self.n_agents
+        ), f"Expected {self.n_agents} agents, but got samples with shape {x.shape}"
+
+        x = x.reshape(x.shape[0], x.shape[1], -1)  # b t a f -> b t (a*f)
+        x = einops.rearrange(x, "b t f -> b f t")
+        t = self.time_mlp(time)
+
+        for layer_idx, (resnet, resnet2, downsample) in enumerate(self.blocks):
+            x = resnet(x, t)
+            x = resnet2(x, t)
+            x = downsample(x)
+
+        x = self.mid_block1(x, t)
+        x = self.mid_block2(x, t)
+
+        x = x.view(len(x), -1)
+        out = self.final_block(torch.cat([x, t], dim=-1))  # x.shape[0] * x.shape[1], 1
 
         return out

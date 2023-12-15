@@ -15,31 +15,54 @@ class ConcatenatedTemporalUnet(nn.Module):
         n_agents: int,
         horizon: int,
         transition_dim: int,
-        cond_dim: int,
+        state_dim: int,
+        use_state: bool = False,
         dim: int = 128,
+        history_horizon: int = 0,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
         returns_condition: bool = False,
+        env_ts_condition: bool = False,
         condition_dropout: float = 0.1,
-        calc_energy: bool = False,
         kernel_size: int = 5,
+        residual_attn: bool = False,  # not used here
+        use_layer_norm: bool = False,
+        max_path_length: int = 100,
+        use_temporal_attention: bool = False,  # not used here
     ):
         super().__init__()
 
+        assert not use_state
+
         self.n_agents = n_agents
-        self.calc_energy = calc_energy
+        self.history_horizon = history_horizon
+        self.use_temporal_attention = use_temporal_attention
+
+        self.returns_condition = returns_condition
+        self.env_ts_condition = env_ts_condition
+
         self.net = TemporalUnet(
             horizon=horizon,
+            history_horizon=history_horizon,
             transition_dim=transition_dim * n_agents,
-            cond_dim=cond_dim,
             dim=dim,
             dim_mults=dim_mults,
             returns_condition=returns_condition,
+            env_ts_condition=env_ts_condition,
             condition_dropout=condition_dropout,
-            calc_energy=calc_energy,
             kernel_size=kernel_size,
+            max_path_length=max_path_length,
         )
 
-    def forward(self, x, time, returns=None, use_dropout=True, force_dropout=False):
+    def forward(
+        self,
+        x,
+        time,
+        returns=None,
+        env_timestep=None,
+        attention_masks=None,
+        use_dropout: bool = True,
+        force_dropout: bool = False,
+    ):
         """
         x : [ batch x horizon x agent x transition ]
         returns : [batch x 1 x agent]
@@ -52,6 +75,7 @@ class ConcatenatedTemporalUnet(nn.Module):
             concat_x,
             time=time,
             returns=returns.mean(dim=2) if returns is not None else None,
+            env_timestep=env_timestep,
             use_dropout=use_dropout,
             force_dropout=force_dropout,
         )
@@ -68,36 +92,58 @@ class IndependentTemporalUnet(nn.Module):
         n_agents: int,
         horizon: int,
         transition_dim: int,
-        cond_dim: int,
+        state_dim: int,
+        use_state: bool = False,
         dim: int = 128,
+        history_horizon: int = 0,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
         returns_condition: bool = False,
+        env_ts_condition: bool = False,
         condition_dropout: float = 0.1,
-        calc_energy: bool = False,
         kernel_size: int = 5,
+        residual_attn: bool = False,  # not used here
+        max_path_length: int = 100,
+        use_temporal_attention: bool = False,
     ):
         super().__init__()
 
         self.n_agents = n_agents
-        self.calc_energy = calc_energy
+        self.use_state = use_state
+        self.history_horizon = history_horizon
+        self.use_temporal_attention = use_temporal_attention
+
+        self.returns_condition = returns_condition
+        self.env_ts_condition = env_ts_condition
+
         self.nets = nn.ModuleList(
             [
                 TemporalUnet(
                     horizon=horizon,
+                    history_horizon=history_horizon,
                     transition_dim=transition_dim,
-                    cond_dim=cond_dim,
                     dim=dim,
                     dim_mults=dim_mults,
                     returns_condition=returns_condition,
+                    env_ts_condition=env_ts_condition,
                     condition_dropout=condition_dropout,
-                    calc_energy=calc_energy,
                     kernel_size=kernel_size,
+                    max_path_length=max_path_length,
                 )
                 for _ in range(n_agents)
             ]
         )
 
-    def forward(self, x, time, returns=None, use_dropout=True, force_dropout=False):
+    def forward(
+        self,
+        x,
+        time,
+        returns=None,
+        env_timestep=None,
+        attention_masks=None,
+        use_dropout: bool = True,
+        force_dropout: bool = False,
+        **kwargs,
+    ):
         """
         x : [ batch x horizon x agent x transition ]
         returns : [batch x agent x horizon]
@@ -112,6 +158,7 @@ class IndependentTemporalUnet(nn.Module):
                     x[:, :, a_idx, :],
                     time=time,
                     returns=returns[:, :, a_idx] if returns is not None else None,
+                    env_timestep=env_timestep,
                     use_dropout=use_dropout,
                     force_dropout=force_dropout,
                 )
@@ -127,32 +174,52 @@ class SharedIndependentTemporalUnet(nn.Module):
         self,
         n_agents: int,
         horizon: int,
+        history_horizon: int,  # not used
         transition_dim: int,
-        cond_dim: int,
+        state_dim: int,
+        use_state: bool = False,
         dim: int = 128,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
         returns_condition: bool = False,
+        env_ts_condition: bool = False,
         condition_dropout: float = 0.1,
-        calc_energy: bool = False,
         kernel_size: int = 5,
+        residual_attn: bool = False,  # not used here
+        max_path_length: int = 100,
     ):
         super().__init__()
 
         self.n_agents = n_agents
-        self.calc_energy = calc_energy
+        self.use_state = use_state
+
+        self.returns_condition = returns_condition
+        self.env_ts_condition = env_ts_condition
+        self.history_horizon = history_horizon
+
         self.net = TemporalUnet(
             horizon=horizon,
+            history_horizon=history_horizon,
             transition_dim=transition_dim,
-            cond_dim=cond_dim,
             dim=dim,
             dim_mults=dim_mults,
             returns_condition=returns_condition,
+            env_ts_condition=env_ts_condition,
             condition_dropout=condition_dropout,
-            calc_energy=calc_energy,
             kernel_size=kernel_size,
+            max_path_length=max_path_length,
         )
 
-    def forward(self, x, time, returns=None, use_dropout=True, force_dropout=False):
+    def forward(
+        self,
+        x,
+        time,
+        returns=None,
+        env_timestep=None,
+        attention_masks=None,
+        use_dropout=True,
+        force_dropout=False,
+        **kwargs,
+    ):
         """
         x : [ batch x horizon x agent x transition ]
         returns : [batch x agent x horizon]
@@ -171,6 +238,9 @@ class SharedIndependentTemporalUnet(nn.Module):
             )
             if returns is not None
             else None,
+            env_timestep=torch.cat([env_timestep for _ in range(x.shape[1])], dim=0)
+            if env_timestep is not None
+            else None,
             use_dropout=use_dropout,
             force_dropout=force_dropout,
         )
@@ -186,7 +256,6 @@ class SharedIndependentTemporalValue(nn.Module):
         self,
         horizon,
         transition_dim,
-        cond_dim,
         n_agents,
         dim=32,
         dim_mults=(1, 2, 4, 8),
@@ -198,7 +267,6 @@ class SharedIndependentTemporalValue(nn.Module):
         self.net = TemporalValue(
             horizon=horizon,
             transition_dim=transition_dim,
-            cond_dim=cond_dim,
             dim=dim,
             dim_mults=dim_mults,
             out_dim=out_dim,

@@ -1,3 +1,4 @@
+from .bc import BehaviorClone
 from .diffusion import (
     ActionGaussianDiffusion,
     GaussianDiffusion,
@@ -6,6 +7,7 @@ from .diffusion import (
 )
 from .ma_nontemporal_wrappers import IndependentBCMLPnet, SharedBCMLPnet
 from .ma_temporal import (
+    ConcatTemporalValue,
     ConvAttentionDeconv,
     ConvAttentionTemporalValue,
     SharedAttentionAutoEncoder,
@@ -18,6 +20,5 @@ from .ma_temporal_wrappers import (
     SharedIndependentTemporalUnet,
     SharedIndependentTemporalValue,
 )
-from .nba_ma_temporal import PlayerConvAttentionDeconv, PlayerSharedConvAttentionDeconv
 from .nontemporal import BCMLPnet
-from .temporal import MLPnet, TemporalUnet, TemporalValue
+from .temporal import TemporalUnet, TemporalValue

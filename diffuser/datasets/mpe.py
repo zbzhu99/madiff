@@ -24,7 +24,7 @@ class StackWrapper(gym.Wrapper):
 class PretrainedPreyWrapper(gym.Wrapper):
     def __init__(self, env: gym.Env, scenario_name: str):
         assert scenario_name in ["simple_tag", "simple_world"], scenario_name
-        # XXX: Pass in `device` as an argument?
+        # XXX(zbzhu): Pass in `device` as an argument?
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.prey = DDPGAgent(
             num_in_pol=env.observation_space[-1].shape[0],
@@ -129,10 +129,11 @@ def load_environment(name, **kwargs):
         env.metadata = {}
     env.metadata["data_split"] = data_split
     env.metadata["name"] = env_name
+    env.metadata["global_feats"] = []
     return env
 
 
-def sequence_dataset(env, preprocess_fn, abs_pos: bool = False):
+def sequence_dataset(env, preprocess_fn, seed: int = None):
     """
     Returns an iterator through trajectories.
     Args:
@@ -157,8 +158,15 @@ def sequence_dataset(env, preprocess_fn, abs_pos: bool = False):
     if not os.path.exists(dataset_path):
         raise FileNotFoundError("Dataset directory not found: {}".format(dataset_path))
 
+    if seed is None:
+        print("\n USE ALL SEED DATASET \n")
+        seed_dirs = os.listdir(dataset_path)
+    else:
+        print(f"\n USE SEED {seed} DATASET \n")
+        seed_dirs = [f"seed_{seed}_data"]
+
     n_agents = env.n
-    for idx, seed_dir in enumerate(os.listdir(dataset_path)):
+    for idx, seed_dir in enumerate(seed_dirs):
         seed_path = os.path.join(dataset_path, seed_dir)
         if not os.path.isdir(seed_path):
             continue
@@ -170,11 +178,6 @@ def sequence_dataset(env, preprocess_fn, abs_pos: bool = False):
             ],
             axis=1,
         )
-
-        if abs_pos:
-            observations[..., 4 : -(n_agents - 1) * 2] = observations[
-                ..., 4 : -(n_agents - 1) * 2
-            ] + np.tile(observations[..., 2:4], 5)
 
         actions = np.stack(
             [

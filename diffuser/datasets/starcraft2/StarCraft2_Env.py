@@ -1,34 +1,29 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
+
+import atexit
+import enum
+import math
+import sys
+from copy import deepcopy
+from operator import attrgetter
+
+import numpy as np
+from absl import flags, logging
+from pysc2 import maps, run_configs
+from pysc2.lib import protocol
 
 from .multiagentenv import MultiAgentEnv
 from .smac_maps import get_map_params
-
-import atexit
-from operator import attrgetter
-from copy import deepcopy
-import numpy as np
-import enum
-import math
-from absl import logging
-
-from pysc2 import maps
-from pysc2 import run_configs
-from pysc2.lib import protocol
-import sys
-from absl import flags
 
 FLAGS = flags.FLAGS
 # FLAGS(sys.argv)
 FLAGS([sys.argv[0]])
 
-from s2clientprotocol import common_pb2 as sc_common
-from s2clientprotocol import sc2api_pb2 as sc_pb
-from s2clientprotocol import raw_pb2 as r_pb
-from s2clientprotocol import debug_pb2 as d_pb
-
 from gym.spaces import Discrete
+from s2clientprotocol import common_pb2 as sc_common
+from s2clientprotocol import debug_pb2 as d_pb
+from s2clientprotocol import raw_pb2 as r_pb
+from s2clientprotocol import sc2api_pb2 as sc_pb
 
 races = {
     "R": sc_common.Random,

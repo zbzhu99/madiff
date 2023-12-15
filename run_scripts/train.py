@@ -1,10 +1,9 @@
 import argparse
 import os
 
+import diffuser.utils as utils
 import torch
 import yaml
-
-import diffuser.utils as utils
 from diffuser.utils.launcher_util import (
     build_config_from_dict,
     discover_latest_checkpoint_path,
@@ -15,14 +14,34 @@ def main(Config, RUN):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
     utils.set_seed(Config.seed)
+    dataset_extra_kwargs = dict()
+
+    if "CTDE" in Config.loader:
+        dataset_extra_kwargs["mask_others"] = getattr(Config, "mask_others", False)
+        if "History" in Config.loader:
+            dataset_extra_kwargs["mask_others_history"] = getattr(
+                Config, "mask_others_history", False
+            )
+
+    # configs that does not exist in old yaml files
+    Config.use_state = getattr(Config, "use_state", False)
+    Config.discrete_action = getattr(Config, "discrete_action", False)
+    Config.state_loss_weight = getattr(Config, "state_loss_weight", None)
+    Config.opponent_loss_weight = getattr(Config, "opponent_loss_weight", None)
+    Config.use_seed_dataset = getattr(Config, "use_seed_dataset", False)
+    Config.residual_attn = getattr(Config, "residual_attn", True)
+    Config.use_temporal_attention = getattr(Config, "use_temporal_attention", True)
+    Config.env_ts_condition = getattr(Config, "env_ts_condition", False)
+    Config.use_return_to_go = getattr(Config, "use_return_to_go", False)
+    Config.joint_inv = getattr(Config, "joint_inv", False)
+
     # -----------------------------------------------------------------------------#
     # ---------------------------------- dataset ----------------------------------#
     # -----------------------------------------------------------------------------#
-
-    customized_kwargs = dict()
-    if Config.env_type == "nba":
-        customized_kwargs["nba_hz"] = Config.nba_hz
-        customized_kwargs["nba_eval_valid_samples"] = Config.nba_eval_valid_samples
+    if Config.diffusion == "models.GaussianInvDynDiffusion":
+        use_inverse_dynamic = True
+    else:
+        use_inverse_dynamic = False
 
     dataset_config = utils.Config(
         Config.loader,
@@ -37,17 +56,26 @@ def main(Config, RUN):
         max_n_episodes=Config.max_n_episodes,
         use_padding=Config.use_padding,
         use_action=Config.use_action,
-        discrete_action=getattr(Config, "discrete_action", False),
+        discrete_action=Config.discrete_action,
         max_path_length=Config.max_path_length,
-        include_returns=Config.include_returns,
+        use_state=Config.use_state,
+        include_returns=Config.returns_condition,
+        include_env_ts=Config.env_ts_condition,
         returns_scale=Config.returns_scale,
         discount=Config.discount,
         termination_penalty=Config.termination_penalty,
         agent_share_parameters=utils.config.import_class(
             Config.model
         ).agent_share_parameters,
-        **customized_kwargs,
+        use_seed_dataset=Config.use_seed_dataset,
+        seed=Config.seed,
+        use_inverse_dynamic=use_inverse_dynamic,
+        decentralized_execution=Config.decentralized_execution,
+        **dataset_extra_kwargs,
     )
+
+    if Config.use_state:
+        print("\n\n USE STATE !!! \n\n")
 
     render_config = utils.Config(
         Config.renderer,
@@ -65,34 +93,57 @@ def main(Config, RUN):
     data_encoder = data_encoder_config()
     observation_dim = dataset.observation_dim
     action_dim = dataset.action_dim
+    state_dim = dataset.state_dim
 
     # -----------------------------------------------------------------------------#
     # ------------------------------ model & trainer ------------------------------#
     # -----------------------------------------------------------------------------#
     if Config.diffusion == "models.GaussianInvDynDiffusion":
-        model_config = utils.Config(
-            Config.model,
-            savepath="model_config.pkl",
-            n_agents=Config.n_agents,
-            horizon=Config.horizon + Config.history_horizon,
-            transition_dim=observation_dim,
-            cond_dim=observation_dim,
-            dim_mults=Config.dim_mults,
-            returns_condition=Config.returns_condition,
-            dim=Config.dim,
-            condition_dropout=Config.condition_dropout,
-            calc_energy=Config.calc_energy,
-            device=Config.device,
-        )
+        if Config.model == "transformer_models.MATransformerTemporalModel":
+            model_config = utils.Config(
+                Config.model,
+                savepath="model_config.pkl",
+                n_agents=Config.n_agents,
+                horizon=Config.horizon + Config.history_horizon,
+                transition_dim=observation_dim,
+                returns_condition=Config.returns_condition,
+                env_ts_condition=Config.env_ts_condition,
+                condition_dropout=Config.condition_dropout,
+                max_path_length=Config.max_path_length,
+                device=Config.device,
+            )
+        else:
+            model_config = utils.Config(
+                Config.model,
+                savepath="model_config.pkl",
+                n_agents=Config.n_agents,
+                horizon=Config.horizon + Config.history_horizon,
+                history_horizon=Config.history_horizon,
+                transition_dim=observation_dim,
+                state_dim=state_dim,
+                dim_mults=Config.dim_mults,
+                returns_condition=Config.returns_condition,
+                env_ts_condition=Config.env_ts_condition,
+                use_state=Config.use_state,
+                dim=Config.dim,
+                condition_dropout=Config.condition_dropout,
+                residual_attn=Config.residual_attn,
+                max_path_length=Config.max_path_length,
+                use_temporal_attention=Config.use_temporal_attention,
+                device=Config.device,
+            )
 
         diffusion_config = utils.Config(
             Config.diffusion,
             savepath="diffusion_config.pkl",
             n_agents=Config.n_agents,
-            horizon=Config.horizon + Config.history_horizon,
+            horizon=Config.horizon,
+            history_horizon=Config.history_horizon,
             observation_dim=observation_dim,
             action_dim=action_dim,
-            discrete_action=getattr(Config, "discrete_action", False),
+            state_dim=state_dim,
+            use_state=Config.use_state,
+            discrete_action=Config.discrete_action,
             num_actions=getattr(dataset.env, "num_actions", 0),
             n_timesteps=Config.n_diffusion_steps,
             loss_type=Config.loss_type,
@@ -102,13 +153,15 @@ def main(Config, RUN):
             ar_inv=Config.ar_inv,
             train_only_inv=Config.train_only_inv,
             share_inv=Config.share_inv,
+            joint_inv=Config.joint_inv,
             # loss weighting
             action_weight=Config.action_weight,
             loss_weights=Config.loss_weights,
+            state_loss_weight=Config.state_loss_weight,
+            opponent_loss_weight=Config.opponent_loss_weight,
             loss_discount=Config.loss_discount,
             returns_condition=Config.returns_condition,
             condition_guidance_w=Config.condition_guidance_w,
-            agent_share_noise=Config.agent_share_noise,
             data_encoder=data_encoder,
             device=Config.device,
         )
@@ -120,12 +173,10 @@ def main(Config, RUN):
             n_agents=Config.n_agents,
             horizon=Config.horizon + Config.history_horizon,
             transition_dim=observation_dim + action_dim,
-            cond_dim=observation_dim,
             dim_mults=Config.dim_mults,
             returns_condition=Config.returns_condition,
             dim=Config.dim,
             condition_dropout=Config.condition_dropout,
-            calc_energy=Config.calc_energy,
             device=Config.device,
         )
 
@@ -211,7 +262,7 @@ def main(Config, RUN):
 
     logger.print("Testing forward...", end=" ", flush=True)
     batch = utils.batchify(dataset[0], Config.device)
-    loss, _ = diffusion.loss(*batch)
+    loss, _ = diffusion.loss(**batch)
     loss.backward()
     logger.print("✓")
 
@@ -230,9 +281,9 @@ def main(Config, RUN):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--experiment", help="experiment specification file")
-    parser.add_argument("-g", "--gpu", help="gpu id", type=int, default=0)
+    parser.add_argument("-g", "--gpu", help="gpu id", type=str, default="0")
     args = parser.parse_args()
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
     with open(args.experiment, "r") as spec_file:
         spec_string = spec_file.read()

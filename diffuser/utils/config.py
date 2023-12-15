@@ -1,4 +1,4 @@
-import collections
+import collections.abc
 import importlib
 
 from ml_logger import logger
@@ -21,7 +21,7 @@ def import_class(_class):
     return _class
 
 
-class Config(collections.Mapping):
+class Config(collections.abc.Mapping):
     def __init__(self, _class, print_info=True, savepath=None, device=None, **kwargs):
         self._class = import_class(_class)
         self._device = device

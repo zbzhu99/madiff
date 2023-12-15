@@ -147,7 +147,7 @@ class Trainer(object):
             for i in range(self.gradient_accumulate_every):
                 batch = next(self.dataloader)
                 batch = batch_to_device(batch, device=self.device)
-                loss, infos = self.model.loss(*batch)
+                loss, infos = self.model.loss(**batch)
                 loss = loss / self.gradient_accumulate_every
                 loss.backward()
 
@@ -175,7 +175,7 @@ class Trainer(object):
                     step=self.step, loss=loss.detach().item(), **metrics, flush=True
                 )
 
-            if self.step == 0 and self.sample_freq:
+            if self.sample_freq and self.step == 0:
                 self.render_reference(self.n_reference)
 
             if self.sample_freq and self.step % self.sample_freq == 0:
@@ -257,8 +257,8 @@ class Trainer(object):
         dataloader_tmp.close()
 
         # get trajectories and condition at t=0 from batch
-        trajectories = to_np(batch.trajectories)
-        # conditions = to_np(batch.conditions[0])[:, None]
+        trajectories = to_np(batch["x"])
+        # conditions = to_np(batch.cond[0])[:, None]
 
         # [ batch_size x horizon x observation_dim ]
         normed_observations = trajectories[..., self.dataset.action_dim :]
@@ -278,7 +278,7 @@ class Trainer(object):
         for i in range(batch_size):
             # get a single datapoint
             batch = self.dataloader_vis.__next__()
-            conditions = to_device(batch.conditions, self.device)
+            conditions = to_device(batch.cond, self.device)
             player_conditions = None
             if (
                 "player_idxs" in conditions and "player_hoop_sides" in conditions
@@ -292,6 +292,7 @@ class Trainer(object):
                     for key, val in list(conditions.items())
                     if (key != "player_idxs" and key != "player_hoop_sides")
                 }
+
             # repeat each item in conditions `n_samples` times
             if len(list(conditions.values())[0].shape) == 4:
                 conditions = apply_dict(
@@ -314,7 +315,8 @@ class Trainer(object):
                     "b d -> (repeat b) d",
                     repeat=n_samples,
                 )
-            if player_conditions != None:
+
+            if player_conditions is not None:
                 player_conditions = apply_dict(
                     einops.repeat,
                     player_conditions,
@@ -324,6 +326,7 @@ class Trainer(object):
                 for key, val in list(player_conditions.items()):
                     assert key == "player_idxs" or key == "player_hoop_sides"
                     conditions[key] = val
+
             # [ n_samples x horizon x (action_dim + observation_dim) ]
             if self.ema_model.returns_condition:
                 returns = to_device(
@@ -332,20 +335,14 @@ class Trainer(object):
             else:
                 returns = None
 
-            if self.ema_model.model.calc_energy:
-                samples = self.ema_model.grad_conditional_sample(
-                    conditions, returns=returns
-                )
-            else:
-                samples = self.ema_model.conditional_sample(conditions, returns=returns)
-
+            samples = self.ema_model.conditional_sample(conditions, returns=returns)
             samples = to_np(samples)
 
             # [ n_samples x horizon x agent x observation_dim ]
             normed_observations = samples[:, :, :, self.dataset.action_dim :]
 
             # [ 1 x 1 x agent x observation_dim ]
-            # normed_conditions = to_np(batch.conditions[0])[:, None]
+            # normed_conditions = to_np(batch.cond[0])[:, None]
 
             # from diffusion.datasets.preprocessing import blocks_cumsum_quat
             # observations = conditions + blocks_cumsum_quat(deltas)
@@ -377,7 +374,7 @@ class Trainer(object):
         for i in range(batch_size):
             # get a single datapoint
             batch = self.dataloader_vis.__next__()
-            conditions = to_device(batch.conditions, self.device)
+            conditions = to_device(batch["cond"], self.device)
             # repeat each item in conditions `n_samples` times
             if len(list(conditions.values())[0].shape) == 3:
                 conditions = apply_dict(
@@ -409,20 +406,14 @@ class Trainer(object):
             else:
                 returns = None
 
-            if self.ema_model.model.calc_energy:
-                samples = self.ema_model.grad_conditional_sample(
-                    conditions, returns=returns
-                )
-            else:
-                samples = self.ema_model.conditional_sample(conditions, returns=returns)
-
+            samples = self.ema_model.conditional_sample(conditions, returns=returns)
             samples = to_np(samples)
 
             # [ n_samples x horizon x n_agents x observation_dim ]
             normed_observations = samples[:, :, :, :]
 
             # [ 1 x 1 x n_agents x observation_dim ]
-            # normed_conditions = to_np(batch.conditions[0])[:, None]
+            # normed_conditions = to_np(batch.cond[0])[:, None]
 
             # from diffusion.datasets.preprocessing import blocks_cumsum_quat
             # observations = conditions + blocks_cumsum_quat(deltas)

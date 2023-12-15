@@ -1,4 +1,3 @@
-import collections
 import pdb
 
 import numpy as np
@@ -62,12 +61,12 @@ def batchify(batch, device):
     """
     fn = lambda x: to_torch(x[None], device=device)
 
-    batched_vals = []
-    for field in batch._fields:
-        val = getattr(batch, field)
+    batched_vals = {}
+    for field in batch.keys():
+        val = batch[field]
         val = apply_dict(fn, val) if type(val) is dict else fn(val)
-        batched_vals.append(val)
-    return type(batch)(*batched_vals)
+        batched_vals[field] = val
+    return batched_vals
 
 
 def apply_dict(fn, d, *args, **kwargs):
@@ -101,14 +100,15 @@ def to_img(x):
 
 
 def set_device(device):
+    global DEVICE
     DEVICE = device
     if "cuda" in device:
         torch.set_default_tensor_type(torch.cuda.FloatTensor)
 
 
 def batch_to_device(batch, device="cuda:0"):
-    vals = [to_device(getattr(batch, field), device) for field in batch._fields]
-    return type(batch)(*vals)
+    device_batch = {k: to_device(batch[k], device) for k in batch.keys()}
+    return device_batch
 
 
 def _to_str(num):
@@ -135,8 +135,7 @@ def report_parameters(model, topk=10):
 
     modules = dict(model.named_modules())
     sorted_keys = sorted(counts, key=lambda x: -counts[x])
-    max_length = max([len(k) for k in sorted_keys])
-    for i in range(topk):
+    for i in range(min(topk, len(modules))):
         key = sorted_keys[i]
         count = counts[key]
         module = param_to_module(key)

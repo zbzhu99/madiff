@@ -1,7 +1,0 @@
-pettingzoo==1.22.0
-pygame
-supersuit
-autorom
-numpy
-gym
-opencv-python

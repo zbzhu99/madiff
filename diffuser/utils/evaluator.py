@@ -1,14 +1,16 @@
 import gc
+import importlib
 import multiprocessing
 import os
 import pickle
 import sys
 import time
 from collections import deque
-from copy import deepcopy
+from copy import copy, deepcopy
 from multiprocessing import Pipe, connection
 from multiprocessing.context import Process
 
+import einops
 import numpy as np
 import torch
 from ml_logger import logger
@@ -33,50 +35,80 @@ class MADEvaluatorWorker(Process):
         self.verbose = verbose
         super().__init__()
 
-    def _generate_samples(self, obs, returns, use_history: bool, ctde: bool = False):
+    def _generate_samples(self, obs, returns, env_ts):
         Config = self.Config
 
-        if ctde:
-            samples = []
-            for agent_idx in range(Config.n_agents):
-                if use_history:
-                    conditions = {
-                        (0, Config.history_horizon + 1): to_torch(
-                            obs[:, :, agent_idx], device=Config.device
-                        ),
-                        "agent_idx": to_torch(
-                            [[agent_idx]], device=Config.device
-                        ).repeat(obs.shape[0], 1, 1),
-                    }
-                else:
-                    conditions = {
-                        0: to_torch(obs[:, agent_idx], device=Config.device),
-                        "agent_idx": to_torch([agent_idx], device=Config.device).repeat(
-                            obs.shape[0], 1
-                        ),
-                    }
+        env_ts = env_ts.clone()
+        env_ts[torch.where(env_ts < 0)] = Config.max_path_length
+        env_ts[torch.where(env_ts >= Config.max_path_length)] = Config.max_path_length
 
-                samples_ = self.trainer.ema_model.conditional_sample(
-                    conditions, returns=returns
+        attention_masks = np.zeros(
+            (obs.shape[0], Config.horizon + Config.history_horizon, Config.n_agents, 1)
+        )
+        attention_masks[:, Config.history_horizon :] = 1.0
+
+        if Config.decentralized_execution:
+            joint_obs, joint_attention_masks, agent_idx = [], [], []
+            for a_idx in range(Config.n_agents):
+                local_obs = np.zeros_like(obs)  # b t a f
+                local_obs[:, :, a_idx] = obs[:, :, a_idx]
+
+                local_attention_masks = copy(attention_masks)
+                local_attention_masks[:, : Config.history_horizon, a_idx] = 1.0
+
+                joint_obs.append(to_torch(local_obs, device=Config.device))
+                joint_attention_masks.append(
+                    to_torch(local_attention_masks, device=Config.device)
                 )
-                samples.append(samples_[..., agent_idx, :])
+                agent_idx.append(
+                    to_torch([[a_idx]], device=Config.device).repeat(obs.shape[0], 1, 1)
+                )
+
+            joint_attention_masks = einops.rearrange(
+                torch.stack(joint_attention_masks, dim=1), "b a ... -> (b a) ..."
+            )
+            joint_obs = einops.rearrange(
+                torch.stack(joint_obs, dim=1), "b a ... -> (b a) ..."
+            )
+            agent_idx = einops.rearrange(
+                torch.stack(agent_idx, dim=1), "b a ... -> (b a) ..."
+            )
+            conditions = {
+                (0, Config.history_horizon + 1): joint_obs,
+                "agent_idx": agent_idx,
+            }
+            returns = einops.repeat(returns, "b ... -> (b a) ...", a=Config.n_agents)
+            env_ts = einops.repeat(env_ts, "b ... -> (b a) ...", a=Config.n_agents)
+
+            joint_samples = self.trainer.ema_model.conditional_sample(
+                conditions,
+                returns=returns,
+                env_ts=env_ts,
+                attention_masks=joint_attention_masks,
+            )
+            joint_samples = einops.rearrange(
+                joint_samples, "(b a) ... -> b a ...", a=Config.n_agents
+            )
+
+            samples = []
+            for a_idx in range(Config.n_agents):
+                samples.append(joint_samples[:, a_idx, ..., a_idx, :])
             samples = torch.stack(samples, dim=-2)
 
         else:
-            if use_history:
-                conditions = {
-                    (0, Config.history_horizon + 1): to_torch(obs, device=Config.device)
-                }
-            else:
-                conditions = {0: to_torch(obs, device=Config.device)}
+            conditions = {
+                (0, Config.history_horizon + 1): to_torch(obs, device=Config.device)
+            }
+            attention_masks[:, : Config.history_horizon] = 1.0
+            attention_masks = to_torch(attention_masks, device=Config.device)
             samples = self.trainer.ema_model.conditional_sample(
                 conditions,
                 returns=returns,
-                use_ddim_sample=getattr(Config, "use_ddim_sample", False),
+                env_ts=env_ts,
+                attention_masks=attention_masks,
             )
 
-        if use_history:
-            samples = samples[:, Config.history_horizon :]
+        samples = samples[:, Config.history_horizon :]
         return samples
 
     def _evaluate(self, load_step=None):
@@ -115,7 +147,7 @@ class MADEvaluatorWorker(Process):
         num_envs = Config.num_envs
 
         episode_rewards = []
-        if Config.env_type == "smac":
+        if Config.env_type == "smac" or Config.env_type == "smacv2":
             episode_wins = []
 
         cur_num_eval = 0
@@ -123,18 +155,13 @@ class MADEvaluatorWorker(Process):
             num_episodes = min(num_eval - cur_num_eval, num_envs)
             rets = self._episodic_eval(num_episodes=num_episodes)
             episode_rewards.append(rets[1])
-            if Config.env_type == "smac":
+            if Config.env_type == "smac" or Config.env_type == "smacv2":
                 episode_wins.append(rets[2])
-
-            if cur_num_eval == 0:
-                recorded_obs = rets[0]
-                savepath = os.path.join("images", "sample-executed.png")
-                self.trainer.renderer.composite(savepath, recorded_obs)
 
             cur_num_eval += num_episodes
 
         episode_rewards = np.concatenate(episode_rewards, axis=0)
-        if Config.env_type == "smac":
+        if Config.env_type == "smac" or Config.env_type == "smacv2":
             episode_wins = np.concatenate(episode_wins, axis=0)
 
         metrics_dict = dict(
@@ -142,22 +169,36 @@ class MADEvaluatorWorker(Process):
             std_ep_reward=np.std(episode_rewards, axis=0),
         )
 
-        if Config.env_type == "smac":
+        if Config.env_type == "smac" or Config.env_type == "smacv2":
             metrics_dict["win_rate"] = np.mean(episode_wins)
 
         logger.print(
             ", ".join([f"{k}: {v}" for k, v in metrics_dict.items()]),
             color="green",
         )
+        save_file_path = (
+            f"results/step_{load_step}-ep_{num_eval}-ddim.json"
+            if getattr(Config, "use_ddim_sample", False)
+            else f"results/step_{load_step}-ep_{num_eval}.json"
+        )
+        if self.rewrite_cgw:
+            save_file_path = save_file_path.replace(
+                ".json", f"-cg_{self.trainer.ema_model.condition_guidance_w}.json"
+            )
         logger.save_json(
             {
                 k: v.tolist() if isinstance(v, np.ndarray) else v
                 for k, v in metrics_dict.items()
             },
-            f"results/step_{load_step}-ep_{num_eval}-ddim.json"
-            if getattr(Config, "use_ddim_sample", False)
-            else f"results/step_{load_step}-ep_{num_eval}.json",
+            save_file_path,
         )
+
+    def _update_return_to_go(self, rtg, reward):
+        rtg = rtg * self.Config.returns_scale
+        reward = torch.tensor(reward, device=rtg.device, dtype=rtg.dtype).reshape(1, -1)
+        rtg = (rtg - reward) / self.Config.discount
+        rtg = rtg / self.Config.returns_scale
+        return rtg
 
     def _episodic_eval(self, num_episodes: int):
         """Evaluate for one episode each environment."""
@@ -172,72 +213,50 @@ class MADEvaluatorWorker(Process):
         device = Config.device
         observation_dim = self.normalizer.observation_dim
 
-        if Config.loader in [
-            "datasets.CTDESequenceDataset",
-            "datasets.CTDEHistoryCondSequenceDataset",
-        ]:
-            print("\n Using CTDE Evaluation \n")
-            use_ctde = True
-        else:
-            assert (
-                "CTDE" not in Config.loader
-            ), f"Unknown CTDE dataset `{Config.loader}`"
-            print("\n Using CTCE Evaluation \n")
-            use_ctde = False
-
         dones = [0 for _ in range(num_episodes)]
         episode_rewards = [np.zeros(Config.n_agents) for _ in range(num_episodes)]
-        if Config.env_type == "smac":
+        if Config.env_type == "smac" or Config.env_type == "smacv2":
             episode_wins = np.zeros(num_episodes)
 
         returns = to_device(
             Config.test_ret * torch.ones(num_episodes, 1, Config.n_agents), device
         )
+        env_ts = to_device(
+            torch.arange(Config.horizon + Config.history_horizon)
+            - Config.history_horizon,
+            device,
+        )
+        env_ts = einops.repeat(env_ts, "t -> b t", b=num_episodes)
 
         t = 0
         obs_list = [env.reset()[None] for env in self.env_list[:num_episodes]]
         obs = np.concatenate(obs_list, axis=0)
         recorded_obs = [deepcopy(obs[:, None])]
 
-        if hasattr(Config, "history_horizon") and Config.history_horizon > 0:
+        if Config.history_horizon > 0:
             print(f"\nUsing history length of {Config.history_horizon}\n")
-            use_history = True
-            obs_queue = deque(maxlen=Config.history_horizon + 1)
-            obs_queue.extend(
-                [np.zeros_like(obs) for _ in range(Config.history_horizon)]
-            )
         else:
-            use_history = False
+            print("\nDo NOT use history conditioning\n")
+        obs_queue = deque(maxlen=Config.history_horizon + 1)
+        obs_queue.extend([np.zeros_like(obs) for _ in range(Config.history_horizon)])
 
         while sum(dones) < num_episodes:
             obs = self.normalizer.normalize(obs, "observations")
-            if getattr(Config, "abs_pos", False):
-                obs[..., 4 : -(Config.n_agents - 1) * 2] = obs[
-                    ..., 4 : -(Config.n_agents - 1) * 2
-                ] + np.tile(obs[..., 2:4], 5)
+            obs_queue.append(obs)
+            obs = np.stack(list(obs_queue), axis=1)
 
-            if use_history:
-                obs_queue.append(obs)
-                obs = np.stack(list(obs_queue), axis=1)
-
-            samples = self._generate_samples(obs, returns, use_history, ctde=use_ctde)
+            samples = self._generate_samples(obs, returns, env_ts)
 
             obs_comb = torch.cat([samples[:, 0, :, :], samples[:, 1, :, :]], dim=-1)
             obs_comb = obs_comb.reshape(-1, Config.n_agents, 2 * observation_dim)
-            if getattr(Config, "ego_only_inv", False):
-                ego_observation_dim = 4
-                obs_comb = torch.cat(
-                    [
-                        obs_comb[..., :ego_observation_dim],
-                        obs_comb[
-                            ..., observation_dim : observation_dim + ego_observation_dim
-                        ],
-                    ],
-                    dim=-1,
-                )
 
-            if Config.share_inv:
-                action = self.trainer.ema_model.inv_model(obs_comb)
+            if Config.share_inv or Config.joint_inv:
+                if Config.joint_inv:
+                    action = self.trainer.ema_model.inv_model(
+                        obs_comb.reshape(obs_comb.shape[0], -1)
+                    ).reshape(obs_comb.shape[0], obs_comb.shape[1], -1)
+                else:
+                    action = self.trainer.ema_model.inv_model(obs_comb)
             else:
                 action = torch.stack(
                     [
@@ -270,16 +289,15 @@ class MADEvaluatorWorker(Process):
             obs_list = []
             for i in range(num_episodes):
                 if dones[i] == 1:
-                    if use_history:
-                        obs_list.append(obs[i, 0][None])
-                    else:
-                        obs_list.append(obs[i][None])
-
+                    obs_list.append(obs[i, 0][None])
                 else:
                     this_obs, this_reward, this_done, this_info = self.env_list[i].step(
                         action[i]
                     )
                     obs_list.append(this_obs[None])
+
+                    if Config.use_return_to_go:
+                        returns[i] = self._update_return_to_go(returns[i], this_reward)
 
                     if this_done.all() or t >= Config.max_path_length - 1:
                         dones[i] = 1
@@ -301,16 +319,17 @@ class MADEvaluatorWorker(Process):
             obs = np.concatenate(obs_list, axis=0)
             recorded_obs.append(deepcopy(obs[:, None]))
             t += 1
+            env_ts = env_ts + 1
 
         recorded_obs = np.concatenate(recorded_obs, axis=1)
         episode_rewards = np.array(episode_rewards)
 
-        if Config.env_type == "smac":
+        if Config.env_type == "smac" or Config.env_type == "smacv2":
             return recorded_obs, episode_rewards, episode_wins
         else:
             return recorded_obs, episode_rewards
 
-    def _init(self, log_dir, **kwargs):
+    def _init(self, log_dir, condition_guidance_w=None, **kwargs):
         assert self.initialized is False, "Evaluator can only be initialized once."
 
         self.log_dir = log_dir
@@ -319,6 +338,8 @@ class MADEvaluatorWorker(Process):
 
         Config = build_config_from_dict(params["Config"])
         self.Config = Config = build_config_from_dict(kwargs, Config)
+        self.Config.joint_inv = getattr(Config, "joint_inv", False)
+        self.Config.use_return_to_go = getattr(Config, "use_return_to_go", False)
         self.Config.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         )
@@ -341,6 +362,12 @@ class MADEvaluatorWorker(Process):
         with open(os.path.join(log_dir, "render_config.pkl"), "rb") as f:
             render_config = pickle.load(f)
 
+        self.rewrite_cgw = False
+        if condition_guidance_w is not None:
+            print(f"Set condition guidance weight to {condition_guidance_w}")
+            diffusion_config._dict["condition_guidance_w"] = condition_guidance_w
+            self.rewrite_cgw = True
+
         dataset = dataset_config()
         self.normalizer = dataset.normalizer
         del dataset
@@ -352,24 +379,23 @@ class MADEvaluatorWorker(Process):
         self.trainer = trainer_config(diffusion, None, renderer)
 
         self.discrete_action = False
+        if Config.env_type == "smac" or Config.env_type == "smacv2":
+            self.discrete_action = True
 
         """ Load Environment """
-        if Config.env_type == "d4rl":
-            from diffuser.datasets.d4rl import load_environment
-        elif Config.env_type == "ma_mujoco":
-            from diffuser.datasets.ma_mujoco import load_environment
-        elif Config.env_type == "mpe":
-            from diffuser.datasets.mpe import load_environment
-        elif Config.env_type == "smac":
-            from diffuser.datasets.smac import load_environment
-
-            self.discrete_action = True
-        else:
-            raise NotImplementedError(f"{Config.env_type} not implemented")
+        env_mod_name = {
+            "d4rl": "diffuser.datasets.d4rl",
+            "mahalfcheetah": "diffuser.datasets.mahalfcheetah",
+            "mamujoco": "diffuser.datasets.mamujoco",
+            "mpe": "diffuser.datasets.mpe",
+            "smac": "diffuser.datasets.smac_env",
+            "smacv2": "diffuser.datasets.smacv2_env",
+        }[Config.env_type]
+        env_mod = importlib.import_module(env_mod_name)
 
         Config.num_envs = getattr(Config, "num_envs", Config.num_eval)
         self.env_list = [
-            load_environment(Config.dataset) for _ in range(Config.num_envs)
+            env_mod.load_environment(Config.dataset) for _ in range(Config.num_envs)
         ]
         self.initialized = True
 

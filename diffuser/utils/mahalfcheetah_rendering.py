@@ -1,10 +1,13 @@
 import warnings
+from copy import copy
 
 import gym
 import matplotlib.pyplot as plt
 import mujoco_py as mjc
 import numpy as np
 from ml_logger import logger
+
+from diffuser.datasets.mahalfcheetah import load_environment
 
 from .arrays import to_np
 from .video import save_video, save_videos
@@ -19,15 +22,12 @@ def env_map(env_type, env_name):
     map D4RL dataset names to custom fully-observed
     variants for rendering
     """
-    assert env_type == "d4rl", env_type
-    if "halfcheetah" in env_name:
+
+    assert env_type == "mahalfcheetah", env_type
+    if "HalfCheetah" in env_name:
         return "HalfCheetahFullObs-v2"
-    elif "hopper" in env_name:
-        return "HopperFullObs-v2"
-    elif "walker2d" in env_name:
-        return "Walker2dFullObs-v2"
     else:
-        return env_name
+        raise NotImplementedError(env_type)
 
 
 # -----------------------------------------------------------------------------#
@@ -47,22 +47,49 @@ def atmost_2d(x):
     return x
 
 
+def update_agent_obs_to_states(env, env_states, agent_observations):
+    # NOTE(zbzhu): only support ma halfcheetah now
+    assert (
+        len(env_states) == agent_observations.shape[0]
+    ), f"{len(env_states)} != {agent_observations.shape[0]}"
+    env_states = copy(env_states)
+
+    k_categories = env.k_categories
+    for agent_idx in range(env.n_agents):
+        observations = agent_observations[:, agent_idx]
+        k_dict = env.k_dicts[agent_idx]
+
+        cnt = 0
+        for k in sorted(list(k_dict.keys())):
+            cats = k_categories[k]
+            for _t in k_dict[k]:
+                for c in cats:
+                    dim = getattr(_t, "{}_ids".format(c))
+                    env_states[:, dim] = observations[:, cnt]
+                    cnt += 1
+
+    return env_states
+
+
 # -----------------------------------------------------------------------------#
 # ---------------------------------- renderers --------------------------------#
 # -----------------------------------------------------------------------------#
 
 
-class MuJoCoRenderer:
+class MAHalfCheetahRenderer:
     """
-    default mujoco renderer
+    default ma halfcheetah renderer
     """
 
     def __init__(self, env_type, env):
         if type(env) is str:
+            self.ma_env = load_environment(env)
             env = env_map(env_type, env)
             self.env = gym.make(env)
         else:
             self.env = env
+        self.initial_state = self.ma_env.get_state()
+
         # - 1 because the envs in renderer are fully-observed
         # @TODO : clean up
         self.observation_dim = np.prod(self.env.observation_space.shape) - 1
@@ -178,7 +205,8 @@ class MuJoCoRenderer:
         images = []
         for path in paths:
             # [ H x obs_dim ]
-            path = path.squeeze(1)
+            env_states = self.initial_state.reshape(1, -1).repeat(path.shape[0], axis=0)
+            path = update_agent_obs_to_states(self.ma_env, env_states, path)
             path = atmost_2d(path)
             img = self.renders(
                 to_np(path),

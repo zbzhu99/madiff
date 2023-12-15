@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 import scipy.interpolate as interpolate
 
@@ -13,31 +15,35 @@ class DatasetNormalizer:
         self,
         dataset,
         normalizer,
+        global_feats: List[str] = ["states"],
         agent_share_parameters=False,
         path_lengths=None,
     ):
-        dataset = flatten(dataset, path_lengths)  # dataset from `ReplayBuffer` object to python dict
+        dataset = flatten(
+            dataset, path_lengths
+        )  # dataset from `ReplayBuffer` object to python dict
 
         self.n_agents = dataset["observations"].shape[1]
         self.observation_dim = dataset["observations"].shape[-1]
         self.action_dim = (
             dataset["actions"].shape[-1] if "actions" in dataset.keys() else 0
         )
+        self.global_feats = global_feats
         self.agent_share_parameters = agent_share_parameters
 
-        if type(normalizer) == str:
+        if type(normalizer) is str:
             normalizer = eval(normalizer)
 
         self.normalizers = {}
         for key, val in dataset.items():
             try:
-                if self.agent_share_parameters:
+                if key in global_feats or self.agent_share_parameters:
                     self.normalizers[key] = normalizer(val.reshape(-1, val.shape[-1]))
                 else:
                     self.normalizers[key] = [
                         normalizer(val[:, i]) for i in range(val.shape[1])
                     ]
-            except:
+            except Exception:
                 print(f"[ utils/normalization ] Skipping {key} | {normalizer}")
             # key: normalizer(val)
             # for key, val in dataset.items()
@@ -52,7 +58,7 @@ class DatasetNormalizer:
         return self.normalize(*args, **kwargs)
 
     def normalize(self, x, key):
-        if self.agent_share_parameters:
+        if key in self.global_feats or self.agent_share_parameters:
             return self.normalizers[key].normalize(x)
         else:
             return np.stack(
@@ -64,7 +70,7 @@ class DatasetNormalizer:
             )
 
     def unnormalize(self, x, key):
-        if self.agent_share_parameters:
+        if key in self.global_feats or self.agent_share_parameters:
             return self.normalizers[key].unnormalize(x)
         else:
             return np.stack(
@@ -187,7 +193,7 @@ class LimitsNormalizer(Normalizer):
 
     def normalize(self, x):
         # [ 0, 1 ]
-        x = (x - self.mins) / (self.maxs - self.mins)
+        x = (x - self.mins) / (self.maxs - self.mins + 1e-20)
         # [ -1, 1 ]
         x = 2 * x - 1
         return x

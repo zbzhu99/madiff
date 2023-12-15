@@ -1,7 +1,10 @@
+import math
+from typing import Tuple
+
 import einops
 import torch
 import torch.nn as nn
-from einops import rearrange
+from einops import einsum, rearrange
 from einops.layers.torch import Rearrange
 from torch.distributions import Bernoulli
 
@@ -51,27 +54,74 @@ class LinearAttention(nn.Module):
         return self.to_out(out)
 
 
-class GlobalMixing(nn.Module):
-    def __init__(self, dim, heads=4, dim_head=128):
+class TemporalSelfAttention(nn.Module):
+    def __init__(
+        self,
+        n_channels: int,
+        qk_n_channels: int,
+        v_n_channels: int,
+        embed_dim: int,
+        nheads: int = 4,
+        residual: bool = False,
+    ):
         super().__init__()
-        self.heads = heads
-        hidden_dim = dim_head * heads
-        self.to_qkv = nn.Conv2d(dim, hidden_dim * 3, 1, bias=False)
-        self.to_out = nn.Conv2d(hidden_dim, dim, 1)
+        self.nheads = nheads
 
-    def forward(self, x):
-        b, c, h, w = x.shape
-        qkv = self.to_qkv(x)
-        q, k, v = rearrange(
-            qkv, "b (qkv heads c) h w -> qkv b heads c (h w)", heads=self.heads, qkv=3
+        self.query_layer = nn.Conv1d(n_channels, qk_n_channels * nheads, kernel_size=1)
+        self.key_layer = nn.Conv1d(n_channels, qk_n_channels * nheads, kernel_size=1)
+        self.value_layer = nn.Conv1d(n_channels, v_n_channels * nheads, kernel_size=1)
+
+        self.query_time_mlp = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(embed_dim, qk_n_channels * nheads),
+            Rearrange("batch t -> batch t 1"),
         )
-        k = k.softmax(dim=-1)
-        context = torch.einsum("bhdn,bhen->bhde", k, v)
-        out = torch.einsum("bhde,bhdn->bhen", context, q)
-        out = rearrange(
-            out, "b heads c (h w) -> b (heads c) h w", heads=self.heads, h=h, w=w
+        self.key_time_mlp = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(embed_dim, qk_n_channels * nheads),
+            Rearrange("batch t -> batch t 1"),
         )
-        return self.to_out(out)
+        self.value_time_mlp = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(embed_dim, v_n_channels * nheads),
+            Rearrange("batch t -> batch t 1"),
+        )
+
+        self.attend = nn.Softmax(dim=-1)
+        self.residual = residual
+        if residual:
+            self.gamma = nn.Parameter(torch.zeros([1]))
+
+    def forward(self, x, time):
+        x_flat = rearrange(x, "b a f t -> (b a) f t")
+        time = rearrange(time, "b a f -> (b a) f")
+        query, key, value = (
+            self.query_layer(x_flat) + self.query_time_mlp(time),
+            self.key_layer(x_flat) + self.key_time_mlp(time),
+            self.value_layer(x_flat) + self.value_time_mlp(time),
+        )
+
+        query = rearrange(
+            query, "(b a) (h d) t -> h b a (d t)", h=self.nheads, a=x.shape[1]
+        )
+        key = rearrange(
+            key, "(b a) (h d) t -> h b a (d t)", h=self.nheads, a=x.shape[1]
+        )
+        value = rearrange(
+            value, "(b a) (h d) t -> h b a (d t)", h=self.nheads, a=x.shape[1]
+        )
+
+        dots = einsum(query, key, "h b a1 f, h b a2 f -> h b a1 a2") / math.sqrt(
+            query.shape[-1]
+        )
+        attn = self.attend(dots)
+        out = einsum(attn, value, "h b a1 a2, h b a2 f -> h b a1 f")
+
+        out = rearrange(out, "h b a f -> b a (h f)")
+        out = out.reshape(x.shape)
+        if self.residual:
+            out = x + self.gamma * out
+        return out
 
 
 class TemporalMlpBlock(nn.Module):
@@ -109,9 +159,7 @@ class TemporalMlpBlock(nn.Module):
 
 
 class ResidualTemporalBlock(nn.Module):
-    def __init__(
-        self, inp_channels, out_channels, embed_dim, horizon, kernel_size=5, mish=True
-    ):
+    def __init__(self, inp_channels, out_channels, embed_dim, kernel_size=5, mish=True):
         super().__init__()
 
         self.blocks = nn.ModuleList(
@@ -157,15 +205,16 @@ class TemporalUnet(nn.Module):
 
     def __init__(
         self,
-        horizon,
-        transition_dim,
-        cond_dim,
-        dim=128,
-        dim_mults=(1, 2, 4, 8),
-        returns_condition=False,
-        condition_dropout=0.1,
-        calc_energy=False,
-        kernel_size=5,
+        horizon: int,
+        transition_dim: int,
+        history_horizon: int = 0,
+        dim: int = 128,
+        dim_mults: Tuple[int] = (1, 2, 4, 8),
+        returns_condition: bool = False,
+        env_ts_condition: bool = False,
+        condition_dropout: float = 0.1,
+        kernel_size: int = 5,
+        max_path_length: int = 100,
     ):
         super().__init__()
 
@@ -173,12 +222,8 @@ class TemporalUnet(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
         print(f"[ models/temporal ] Channel dimensions: {in_out}")
 
-        if calc_energy:
-            mish = False
-            act_fn = nn.SiLU()
-        else:
-            mish = True
-            act_fn = nn.Mish()
+        mish = True
+        act_fn = nn.Mish()
 
         self.time_dim = dim
         self.returns_dim = dim
@@ -189,10 +234,12 @@ class TemporalUnet(nn.Module):
             act_fn,
             nn.Linear(dim * 4, dim),
         )
+        embed_dim = dim
 
         self.returns_condition = returns_condition
+        self.env_ts_condition = env_ts_condition
         self.condition_dropout = condition_dropout
-        self.calc_energy = calc_energy
+        self.history_horizon = history_horizon
 
         if self.returns_condition:
             self.returns_mlp = nn.Sequential(
@@ -203,9 +250,18 @@ class TemporalUnet(nn.Module):
                 nn.Linear(dim * 4, dim),
             )
             self.mask_dist = Bernoulli(probs=1 - self.condition_dropout)
-            embed_dim = 2 * dim
-        else:
-            embed_dim = dim
+            embed_dim += dim
+
+        if self.env_ts_condition:
+            self.env_ts_mlp = nn.Sequential(
+                nn.Embedding(max_path_length + 1, dim),
+                nn.Linear(dim, dim * 4),
+                act_fn,
+                nn.Linear(dim * 4, dim),
+            )
+            embed_dim += dim
+
+        self.embed_dim = embed_dim
 
         self.downs = nn.ModuleList([])
         self.ups = nn.ModuleList([])
@@ -222,7 +278,6 @@ class TemporalUnet(nn.Module):
                             dim_in,
                             dim_out,
                             embed_dim=embed_dim,
-                            horizon=horizon,
                             kernel_size=kernel_size,
                             mish=mish,
                         ),
@@ -230,7 +285,6 @@ class TemporalUnet(nn.Module):
                             dim_out,
                             dim_out,
                             embed_dim=embed_dim,
-                            horizon=horizon,
                             kernel_size=kernel_size,
                             mish=mish,
                         ),
@@ -247,7 +301,6 @@ class TemporalUnet(nn.Module):
             mid_dim,
             mid_dim,
             embed_dim=embed_dim,
-            horizon=horizon,
             kernel_size=kernel_size,
             mish=mish,
         )
@@ -255,7 +308,6 @@ class TemporalUnet(nn.Module):
             mid_dim,
             mid_dim,
             embed_dim=embed_dim,
-            horizon=horizon,
             kernel_size=kernel_size,
             mish=mish,
         )
@@ -270,7 +322,6 @@ class TemporalUnet(nn.Module):
                             dim_out * 2,
                             dim_in,
                             embed_dim=embed_dim,
-                            horizon=horizon,
                             kernel_size=kernel_size,
                             mish=mish,
                         ),
@@ -278,7 +329,6 @@ class TemporalUnet(nn.Module):
                             dim_in,
                             dim_in,
                             embed_dim=embed_dim,
-                            horizon=horizon,
                             kernel_size=kernel_size,
                             mish=mish,
                         ),
@@ -295,14 +345,20 @@ class TemporalUnet(nn.Module):
             nn.Conv1d(dim, transition_dim, 1),
         )
 
-    def forward(self, x, time, returns=None, use_dropout=True, force_dropout=False):
+    def forward(
+        self,
+        x,
+        time,
+        returns=None,
+        env_timestep=None,
+        attention_masks=None,
+        use_dropout=True,
+        force_dropout=False,
+    ):
         """
         x : [ batch x horizon x transition ]
         returns : [batch x horizon]
         """
-
-        if self.calc_energy:
-            x_inp = x
 
         x = einops.rearrange(x, "b t f -> b f t")
 
@@ -319,6 +375,13 @@ class TemporalUnet(nn.Module):
             if force_dropout:
                 returns_embed = 0 * returns_embed
             t = torch.cat([t, returns_embed], dim=-1)
+
+        if self.env_ts_condition:
+            assert env_timestep is not None
+            env_timestep = env_timestep.to(dtype=torch.int64)
+            env_timestep = env_timestep[:, self.history_horizon]
+            env_ts_embed = self.env_ts_mlp(env_timestep)
+            t = torch.cat([t, env_ts_embed], dim=-1)
 
         h = []
 
@@ -340,211 +403,7 @@ class TemporalUnet(nn.Module):
         x = self.final_conv(x)
 
         x = einops.rearrange(x, "b f t -> b t f")
-
-        if self.calc_energy:
-            # Energy function
-            energy = ((x - x_inp) ** 2).mean()
-            grad = torch.autograd.grad(outputs=energy, inputs=x_inp, create_graph=True)
-            return grad[0]
-        else:
-            return x
-
-
-class MLPnet(nn.Module):
-    agent_share_parameters = True
-
-    def __init__(
-        self,
-        transition_dim,
-        cond_dim,
-        dim=128,
-        dim_mults=(1, 2, 4, 8),
-        horizon=1,
-        returns_condition=True,
-        condition_dropout=0.1,
-        calc_energy=False,
-    ):
-        super().__init__()
-
-        if calc_energy:
-            act_fn = nn.SiLU()
-        else:
-            act_fn = nn.Mish()
-
-        self.time_dim = dim
-        self.returns_dim = dim
-
-        self.time_mlp = nn.Sequential(
-            SinusoidalPosEmb(dim),
-            nn.Linear(dim, dim * 4),
-            act_fn,
-            nn.Linear(dim * 4, dim),
-        )
-
-        self.returns_condition = returns_condition
-        self.condition_dropout = condition_dropout
-        self.calc_energy = calc_energy
-        self.transition_dim = transition_dim
-        self.action_dim = transition_dim - cond_dim
-
-        if self.returns_condition:
-            self.returns_mlp = nn.Sequential(
-                nn.Linear(1, dim),
-                act_fn,
-                nn.Linear(dim, dim * 4),
-                act_fn,
-                nn.Linear(dim * 4, dim),
-            )
-            self.mask_dist = Bernoulli(probs=1 - self.condition_dropout)
-            embed_dim = 2 * dim
-        else:
-            embed_dim = dim
-
-        self.mlp = nn.Sequential(
-            nn.Linear(embed_dim + transition_dim, 1024),
-            act_fn,
-            nn.Linear(1024, 1024),
-            act_fn,
-            nn.Linear(1024, self.action_dim),
-        )
-
-    def forward(self, x, time, returns=None, use_dropout=True, force_dropout=False):
-        """
-        x : [ batch x action ]
-        cond: [batch x state]
-        returns : [batch x 1]
-        """
-        # Assumes horizon = 1
-        t = self.time_mlp(time)
-
-        if self.returns_condition:
-            assert returns is not None
-            returns_embed = self.returns_mlp(returns)
-            if use_dropout:
-                mask = self.mask_dist.sample(
-                    sample_shape=(returns_embed.size(0), 1)
-                ).to(returns_embed.device)
-                returns_embed = mask * returns_embed
-            if force_dropout:
-                returns_embed = 0 * returns_embed
-            t = torch.cat([t, returns_embed], dim=-1)
-
-        inp = torch.cat([t, cond, x], dim=-1)
-        out = self.mlp(inp)
-
-        if self.calc_energy:
-            energy = ((out - x) ** 2).mean()
-            grad = torch.autograd.grad(outputs=energy, inputs=x, create_graph=True)
-            return grad[0]
-        else:
-            return out
-
-
-# class TemporalValue(nn.Module):
-#     def __init__(
-#         self,
-#         horizon,
-#         transition_dim,
-#         cond_dim,
-#         dim=32,
-#         dim_mults=(1, 2, 4, 8),
-#         out_dim=1,
-#     ):
-#         super().__init__()
-
-#         dims = [transition_dim, *map(lambda m: dim * m, dim_mults)]
-#         in_out = list(zip(dims[:-1], dims[1:]))
-
-#         time_dim = dim
-#         self.time_mlp = nn.Sequential(
-#             SinusoidalPosEmb(dim),
-#             nn.Linear(dim, dim * 4),
-#             nn.Mish(),
-#             nn.Linear(dim * 4, dim),
-#         )
-
-#         self.blocks = nn.ModuleList([])
-#         num_resolutions = len(in_out)
-
-#         print(in_out)
-#         for ind, (dim_in, dim_out) in enumerate(in_out):
-#             is_last = ind >= (num_resolutions - 1)
-
-#             self.blocks.append(
-#                 nn.ModuleList(
-#                     [
-#                         ResidualTemporalBlock(
-#                             dim_in,
-#                             dim_out,
-#                             kernel_size=5,
-#                             embed_dim=time_dim,
-#                             horizon=horizon,
-#                         ),
-#                         ResidualTemporalBlock(
-#                             dim_out,
-#                             dim_out,
-#                             kernel_size=5,
-#                             embed_dim=time_dim,
-#                             horizon=horizon,
-#                         ),
-#                         Downsample1d(dim_out),
-#                     ]
-#                 )
-#             )
-
-#             if not is_last:
-#                 horizon = horizon // 2
-
-#         mid_dim = dims[-1]
-#         mid_dim_2 = mid_dim // 2
-#         mid_dim_3 = mid_dim // 4
-
-#         self.mid_block1 = ResidualTemporalBlock(
-#             mid_dim, mid_dim_2, kernel_size=5, embed_dim=time_dim, horizon=horizon
-#         )
-#         self.mid_down1 = Downsample1d(mid_dim_2)
-#         horizon = horizon // 2
-
-#         self.mid_block2 = ResidualTemporalBlock(
-#             mid_dim_2, mid_dim_3, kernel_size=5, embed_dim=time_dim, horizon=horizon
-#         )
-#         self.mid_down2 = Downsample1d(mid_dim_3)
-#         horizon = horizon // 2
-
-#         fc_dim = mid_dim_3 * max(horizon, 1)
-
-#         self.final_block = nn.Sequential(
-#             nn.Linear(fc_dim + time_dim, fc_dim // 2),
-#             nn.Mish(),
-#             nn.Linear(fc_dim // 2, out_dim),
-#         )
-
-#     def forward(self, x, time, *args):
-#         """
-#         x : [ batch x horizon x transition ]
-#         """
-
-#         x = einops.rearrange(x, "b h t -> b t h")
-
-#         # mask out first conditioning timestep, since this is not sampled by the model
-#         # x[:, :, 0] = 0
-
-#         t = self.time_mlp(time)
-
-#         for resnet, resnet2, downsample in self.blocks:
-#             x = resnet(x, t)
-#             x = resnet2(x, t)
-#             x = downsample(x)
-
-#         x = self.mid_block1(x, t)
-#         x = self.mid_down1(x)
-
-#         x = self.mid_block2(x, t)
-#         x = self.mid_down2(x)
-
-#         x = x.view(len(x), -1)
-#         out = self.final_block(torch.cat([x, t], dim=-1))
-#         return out
+        return x
 
 
 class TemporalValue(nn.Module):
@@ -554,7 +413,6 @@ class TemporalValue(nn.Module):
         self,
         horizon,
         transition_dim,
-        cond_dim,
         dim=32,
         dim_mults=(1, 2, 4, 8),
         out_dim=1,
@@ -587,14 +445,12 @@ class TemporalValue(nn.Module):
                             dim_out,
                             kernel_size=5,
                             embed_dim=time_dim,
-                            horizon=horizon,
                         ),
                         ResidualTemporalBlock(
                             dim_out,
                             dim_out,
                             kernel_size=5,
                             embed_dim=time_dim,
-                            horizon=horizon,
                         ),
                         Downsample1d(dim_out) if not is_last else nn.Identity(),
                     ]
@@ -609,10 +465,10 @@ class TemporalValue(nn.Module):
         mid_dim_3 = mid_dim // 16
 
         self.mid_block1 = ResidualTemporalBlock(
-            mid_dim, mid_dim_2, kernel_size=5, embed_dim=time_dim, horizon=horizon
+            mid_dim, mid_dim_2, kernel_size=5, embed_dim=time_dim
         )
         self.mid_block2 = ResidualTemporalBlock(
-            mid_dim_2, mid_dim_3, kernel_size=5, embed_dim=time_dim, horizon=horizon
+            mid_dim_2, mid_dim_3, kernel_size=5, embed_dim=time_dim
         )
         fc_dim = mid_dim_3 * max(horizon, 1)
 

@@ -1,2 +1,3 @@
-from .d4rl import load_environment
-from .sequence import *
+from .sequence import BCSequenceDataset, SequenceDataset, ValueDataset
+
+__all__ = ["SequenceDataset", "ValueDataset", "BCSequenceDataset"]

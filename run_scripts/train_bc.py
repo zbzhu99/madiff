@@ -1,10 +1,9 @@
 import argparse
 import os
 
+import diffuser.utils as utils
 import torch
 import yaml
-
-import diffuser.utils as utils
 from diffuser.utils.launcher_util import (
     build_config_from_dict,
     discover_latest_checkpoint_path,

@@ -50,6 +50,12 @@ def load_environment(name):
     env = wrapped_env.unwrapped
     env.max_episode_steps = wrapped_env._max_episode_steps
     env.name = name
+
+    if hasattr(env, "metadata"):
+        assert isinstance(env.metadata, dict)
+    else:
+        env.metadata = {}
+    env.metadata["global_feats"] = []
     return MultiAgentEnvWrapper(env)
 
 
