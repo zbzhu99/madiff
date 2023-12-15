@@ -11,54 +11,55 @@ This is the official implementation of "MADiff: Offline Multi-agent Learning wit
 
 ## Performances
 
+We omit the standard deviation of the results for brevity. The full results can be found in our [paper](https://arxiv.org/abs/2305.17330).
+
 ### Multi-agent Particle Environment (MPE)
 
-The peformances on MPE datasets from [OMAR paper](https://arxiv.org/abs/2111.11188).
+The peformances on MPE datasets released in [OMAR paper](https://arxiv.org/abs/2111.11188).
 
 | Dataset | Task | BC | MA-ICQ | MA-TD3+BC | MA-CQL | OMAR | MADiff-D | MADiff-C* |
 | :----: | :----: | :----: | :----: | :----: | :----: | :----: | :----: | :----: |
-| Expert | Spread | 35.0 ± 2.6 | 104.0 ± 3.4 | 108.3 ± 3.3 | 98.2 ± 5.2 | 114.9 ± 2.6 | 97.0 ± 4.9 | 116.0 ± 3.5 |
-| Expert | Tag | 40.0 ± 9.6 | 113.0 ± 14.4 | 115.2 ± 12.3 | 93.9 ± 14.0 | 116.2 ± 19.8 | TBD | 168.3 ± 19.0 |
-| Expert | World | 33.0 ± 9.9 | 109.5 ± 22.8 | 110.3 ± 21.3 | 71.9 ± 21.3 | 110.4 ± 25.7 | 115.4 ± 11.1 | 178.9 ± 21.7 |
-| Md-Replay | Spread | 10.0 ± 3.8 | 13.6 ± 5.7 | 15.4 ± 5.6 | 20.0 ± 8.4 | 37.9 ± 12.3 | TBD | 43.1 ± 9.8 |
-| Md-Replay | Tag | 0.9 ± 1.4 | 34.5 ± 27.8 | 28.7 ± 20.9 | 24.8 ± 17.3 | 47.1 ± 15.3 | 63.0 ± 6.8 | 98.8 ± 11.3 |
-| Md-Replay | World | 2.3 ± 1.5 | 12.0 ± 9.1 | 17.4 ± 8.1 | 29.6 ± 13.8 | 42.9 ± 19.5 | 60.3 ± 10.3 | 84.9 ± 3.9 |
-| Medium | Spread | 31.6 ± 4.8 | 29.3 ± 5.5 | 29.3 ± 4.8 | 34.1 ± 7.2 | 47.9 ± 18.9 | 64.7 ± 9.6 | 58.0 ± 2.4 |
-| Medium | Tag | 22.5 ± 1.8 | 63.3 ± 20.0 | 65.1 ± 29.5 | 61.7 ± 23.1 | 66.7 ± 23.2 | 78.3 ± 7.6 | 133.5 ± 20.2 |
-| Medium | World | 25.3 ± 2.0 | 71.9 ± 20.0 | 73.4 ± 9.3 | 58.6 ± 11.2 | 74.6 ± 11.5 | 124.2 ± 6.3 | 157.1 ± 6.8 |
-| Random | Spread | -0.5 ± 3.2 | 6.3 ± 3.5 | 9.8 ± 4.9 | 24.0 ± 9.8 | 34.4 ± 5.3 | TBD | TBD |
-| Random | Tag | 1.2 ± 0.8 | 2.2 ± 2.6 | 5.7 ± 3.5 | 5.0 ± 8.2 | 11.1 ± 2.8 | TBD | TBD |
-| Random | World | -2.4 ± 0.5 | 1.0 ± 3.2 | 2.8 ± 5.5 | 0.6 ± 2.0 | 5.9 ± 5.2 | TBD | TBD |
+| Expert | Spread | 35.0 | 104.0 | 108.3 | 98.2 | **114.9** | 97.0 | 116.0 |
+| Expert | Tag | 40.0 | 113.0 | 115.2 | 93.9 | 116.2 | TBD | 168.3 |
+| Expert | World | 33.0 | 109.5 | 110.3 | 71.9 | 110.4 | **115.4** | 178.9 |
+| Md-Replay | Spread | 10.0 | 13.6 | 15.4 | 20.0 | **37.9** | TBD | 43.1 |
+| Md-Replay | Tag | 0.9 | 34.5 | 28.7 | 24.8 | 47.1 | **63.0** | 98.8 |
+| Md-Replay | World | 2.3 | 12.0 | 17.4 | 29.6 | 42.9 | 60.3 | 84.9 |
+| Medium | Spread | 31.6 | 29.3 | 29.3 | 34.1 | 47.9 | 64.7 | 58.0 |
+| Medium | Tag | 22.5 | 63.3 | 65.1 | 61.7 | 66.7 | 78.3 | 133.5 |
+| Medium | World | 25.3 | 71.9 | 73.4 | 58.6 | 74.6 | 124.2 | 157.1 |
+| Random | Spread | -0.5 | 6.3 | 9.8 | 24.0 | 34.4 | TBD | TBD |
+| Random | Tag | 1.2 | 2.2 | 5.7 | 5.0 | 11.1 | TBD | TBD |
+| Random | World | -2.4 | 1.0 | 2.8 | 0.6 | 5.9 | TBD | TBD |
 
 ### Multi-agent Mujoco (MA-Mujoco)
 
-The peformances on MA-Mujoco datasets from [off-the-grid MARL benchmark](https://arxiv.org/abs/2302.00521).
+The peformances on MA-Mujoco datasets released in [off-the-grid MARL benchmark](https://arxiv.org/abs/2302.00521).
 
 | Dataset | Task | BC | MA-TD3+BC | OMAR | MADiff-D | MADiff-C* |
 | :----: | :----: | :----: | :----: | :----: | :----: | :----: |
-| Good | 2halfcheetah | 6846 ± 574 | 7025 ± 439 | 1434 ± 1903 | **8254 ± 179** | 8662 ± 102 |
-| Medium | 2halfcheetah | 1627 ± 187 | **2561 ± 82** | 1892 ± 220 | 2215 ± 27 | 2221 ± 56 |
-| Poor | 2halfcheetah | 465 ± 59 | 736 ± 72 | 384 ± 420 | **751 ± 74** | 767 ± 42 |
-| Good | 4ant | 2802 ± 133 | 2628 ± 971 | 344 ± 631 | **3090 ± 26** | 3087 ± 32 |
-| Medium | 4ant | 1617 ± 153 | **1843 ± 494** | 929 ± 349 | 1679 ± 93 | 1897 ± 44 |
-| Poor | 4ant | 1033 ± 122 | 1075 ± 96 | 518 ± 112 | **1268 ± 51** | 1332 ± 45 |
+| Good | 2halfcheetah | 6846 | 7025 | 1434 | **8254** | 8662 |
+| Medium | 2halfcheetah | 1627 | **2561** | 1892 | 2215 | 2221 |
+| Poor | 2halfcheetah | 465 | 736 | 384 | **751** | 767 |
+| Good | 4ant | 2802 | 2628 | 344 | **3090** | 3087 |
+| Medium | 4ant | 1617 | **1843** | 929 | 1679 | 1897 |
+| Poor | 4ant | 1033 | 1075 | 518 | **1268** | 1332 |
 
 ### StarCraft Multi-Agent Challenge (SMAC)
 
-The peformances on SMAC datasets from [off-the-grid MARL benchmark](https://arxiv.org/abs/2302.00521).
+The peformances on SMAC datasets released in [off-the-grid MARL benchmark](https://arxiv.org/abs/2302.00521).
 
 | Dataset | Task | BC | QMIX | MA-ICQ | MA-CQL | MADT | MADiff-D | MADiff-C* |
 | :----: | :----: | :----: | :----: | :----: | :----: | :----: | :----: | :----: |
-| Good | 3m | 16.0 ± 1.0 | 13.8 ± 4.5 | 18.8 ± 0.6 | **19.6 ± 0.3** | 19.0 ± 0.3 | **19.6 ± 0.7** | 20.0 ± 0.0 |
-| Medium | 3m | 8.2 ± 0.8 | 17.3 ± 0.9 | 18.1 ± 0.7 | **18.9 ± 0.7** | 15.8 ± 0.5 | 17.2 ± 0.7 | 18.0 ± 0.7 | 
-| Poor | 3m | 4.4 ± 0.1 | 10.0 ± 2.9 | **14.4 ± 1.2** | 5.8 ± 0.4 | 4.2 ± 0.1 | 8.9 ± 0.1 | 9.3 ± 0.6 | 
-| Good | 5m6m | 16.6 ± 0.6 | 8.0 ± 0.5 | 16.3 ± 0.9 | 13.8 ± 3.1 | 16.8 ± 0.1 | **18.0 ± 1.0** | 18.2 ± 1.0 | 
-| Medium | 5m6m | 12.4 ± 0.9 | 12.0 ± 1.1 | 15.3 ± 0.7 | 17.0 ± 1.2 | 16.1 ± 0.2 | TBD | 18.0 ± 1.1 | 
-| Poor | 5m6m | 7.5 ± 0.2 | **10.7 ± 0.9** | 9.4 ± 0.4 | 10.4 ± 1.0 | 7.6 ± 0.3 | 8.9 ± 0.3 | 9.5 ± 0.7 |
-| Good | 8m | 16.7 ± 0.4 | 4.6 ± 2.8 | **19.6 ± 0.3** | 11.3 ± 6.1 | 18.5 ± 0.4 | 19.2 ± 0.1 | 20.0 ± 0.0 | 
-| Medium | 8m | 10.7 ± 0.5 | 13.9 ± 1.6 | 18.6 ± 0.5 | 16.8 ± 3.1 | 18.2 ± 0.1 | **19.2 ± 0.7** | 19.5 ± 0.9 | 
-| Poor | 8m | 5.3 ± 0.1 | 6.0 ± 1.3 | **10.8 ± 0.8** | 4.6 ± 2.4 | 4.8 ± 0.1 | 5.1 ± 0.1 | 5.2 ± 0.1 |
-
+| Good | 3m | 16.0 | 13.8 | 18.8 | **19.6** | 19.0 | **19.6** | 20.0 |
+| Medium | 3m | 8.2 | 17.3 | 18.1 | **18.9** | 15.8 | 17.2 | 18.0 | 
+| Poor | 3m | 4.4 | 10.0 | **14.4** | 5.8 | 4.2 | 8.9 | 9.3 | 
+| Good | 5m6m | 16.6 | 8.0 | 16.3 | 13.8 | 16.8 | **18.0** | 18.2 | 
+| Medium | 5m6m | 12.4 | 12.0 | 15.3 | 17.0 | 16.1 | TBD | 18.0 | 
+| Poor | 5m6m | 7.5 | **10.7** | 9.4 | 10.4 | 7.6 | 8.9 | 9.5 |
+| Good | 8m | 16.7 | 4.6 | **19.6** | 11.3 | 18.5 | 19.2 | 20.0 | 
+| Medium | 8m | 10.7 | 13.9 | 18.6 | 16.8 | 18.2 | **19.2** | 19.5 | 
+| Poor | 8m | 5.3 | 6.0 | **10.8** | 4.6 | 4.8 | 5.1 | 5.2 |
 
 ## Setup
 
