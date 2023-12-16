@@ -20,17 +20,17 @@ The peformances on MPE datasets released in [OMAR paper](https://arxiv.org/abs/2
 | Dataset | Task | BC | MA-ICQ | MA-TD3+BC | MA-CQL | OMAR | MADiff-D | MADiff-C* |
 | :----: | :----: | :----: | :----: | :----: | :----: | :----: | :----: | :----: |
 | Expert | Spread | 35.0 | 104.0 | 108.3 | 98.2 | **114.9** | 97.0 | 116.0 |
-| Expert | Tag | 40.0 | 113.0 | 115.2 | 93.9 | 116.2 | TBD | 168.3 |
+| Expert | Tag | 40.0 | 113.0 | 115.2 | 93.9 | 116.2 | **123.9** | 168.3 |
 | Expert | World | 33.0 | 109.5 | 110.3 | 71.9 | 110.4 | **115.4** | 178.9 |
-| Md-Replay | Spread | 10.0 | 13.6 | 15.4 | 20.0 | **37.9** | TBD | 43.1 |
+| Md-Replay | Spread | 10.0 | 13.6 | 15.4 | 20.0 | **37.9** | 29.1 | 43.1 |
 | Md-Replay | Tag | 0.9 | 34.5 | 28.7 | 24.8 | 47.1 | **63.0** | 98.8 |
-| Md-Replay | World | 2.3 | 12.0 | 17.4 | 29.6 | 42.9 | 60.3 | 84.9 |
-| Medium | Spread | 31.6 | 29.3 | 29.3 | 34.1 | 47.9 | 64.7 | 58.0 |
-| Medium | Tag | 22.5 | 63.3 | 65.1 | 61.7 | 66.7 | 78.3 | 133.5 |
-| Medium | World | 25.3 | 71.9 | 73.4 | 58.6 | 74.6 | 124.2 | 157.1 |
-| Random | Spread | -0.5 | 6.3 | 9.8 | 24.0 | 34.4 | TBD | TBD |
-| Random | Tag | 1.2 | 2.2 | 5.7 | 5.0 | 11.1 | TBD | TBD |
-| Random | World | -2.4 | 1.0 | 2.8 | 0.6 | 5.9 | TBD | TBD |
+| Md-Replay | World | 2.3 | 12.0 | 17.4 | 29.6 | 42.9 | **60.3** | 84.9 |
+| Medium | Spread | 31.6 | 29.3 | 29.3 | 34.1 | 47.9 | **64.7** | 58.0 |
+| Medium | Tag | 22.5 | 63.3 | 65.1 | 61.7 | 66.7 | **78.3** | 133.5 |
+| Medium | World | 25.3 | 71.9 | 73.4 | 58.6 | 74.6 | **124.2** | 157.1 |
+| Random | Spread | -0.5 | 6.3 | 9.8 | 24.0 | **34.4** | 7.2 | 5.0 |
+| Random | Tag | 1.2 | 2.2 | 5.7 | 5.0 | **11.1** | 4.6 | 10.0 |
+| Random | World | -2.4 | 1.0 | 2.8 | 0.6 | **5.9** | 0.7 | 6.1 |
 
 ### Multi-agent Mujoco (MA-Mujoco)
 
@@ -55,11 +55,13 @@ The peformances on SMAC datasets released in [off-the-grid MARL benchmark](https
 | Medium | 3m | 8.2 | 17.3 | 18.1 | **18.9** | 15.8 | 17.2 | 18.0 | 
 | Poor | 3m | 4.4 | 10.0 | **14.4** | 5.8 | 4.2 | 8.9 | 9.3 | 
 | Good | 5m6m | 16.6 | 8.0 | 16.3 | 13.8 | 16.8 | **18.0** | 18.2 | 
-| Medium | 5m6m | 12.4 | 12.0 | 15.3 | 17.0 | 16.1 | TBD | 18.0 | 
+| Medium | 5m6m | 12.4 | 12.0 | 15.3 | 17.0 | 16.1 | **17.5** | 18.0 | 
 | Poor | 5m6m | 7.5 | **10.7** | 9.4 | 10.4 | 7.6 | 8.9 | 9.5 |
 | Good | 8m | 16.7 | 4.6 | **19.6** | 11.3 | 18.5 | 19.2 | 20.0 | 
 | Medium | 8m | 10.7 | 13.9 | 18.6 | 16.8 | 18.2 | **19.2** | 19.5 | 
 | Poor | 8m | 5.3 | 6.0 | **10.8** | 4.6 | 4.8 | 5.1 | 5.2 |
+
+*\* MADiff-C is not meant to be a fair comparison with baseline methods but to show if MADiff-D fills the gap for coordination without global information.*
 
 ## Setup
 
@@ -172,4 +174,4 @@ python run_experiment.py -e exp_specs/eval_inv.yaml
 
 ## Acknowledgements
 
-The codebase is built upon [decision-diffuser repo](https://github.com/anuragajay/decision-diffuser).
+The codebase is built upon [decision-diffuser repo](https://github.com/anuragajay/decision-diffuser) and [ILSwiss](https://github.com/Ericonaldo/ILSwiss).
