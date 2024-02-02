@@ -78,7 +78,7 @@ constants:
   # eval
   evaluator: "utils.MADEvaluator"
   num_eval: 10
-  eval_freq: 0
+  eval_freq: 100000
 
   # load checkpoint
   continue_training: True # True

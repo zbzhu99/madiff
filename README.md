@@ -146,14 +146,14 @@ To start training, run the following commands
 
 ```bash
 # multi-agent particle environment
-python run_experiment.py -e exp_specs/mpe/mad_mpe_<task>_attn_<dataset>.yaml  # CTCE
-python run_experiment.py -e exp_specs/mpe/mad_mpe_<task>_ctde_<dataset>.yaml  # CTDE
+python run_experiment.py -e exp_specs/mpe/<task>/mad_mpe_<task>_attn_<dataset>.yaml  # CTCE
+python run_experiment.py -e exp_specs/mpe/<task>/mad_mpe_<task>_ctde_<dataset>.yaml  # CTDE
 # ma-mujoco
-python run_experiment.py -e exp_specs/mamujoco/mad_mamujoco_<map>_attn_<dataset>_history.yaml  # CTCE
-python run_experiment.py -e exp_specs/mamujoco/mad_mamujoco_<map>_ctde_<dataset>_history.yaml  # CTDE
+python run_experiment.py -e exp_specs/mamujoco/<task>/mad_mamujoco_<task>_attn_<dataset>_history.yaml  # CTCE
+python run_experiment.py -e exp_specs/mamujoco/<task>/mad_mamujoco_<task>_ctde_<dataset>_history.yaml  # CTDE
 # smac
-python run_experiment.py -e exp_specs/smac/mad_smac_<map>_attn_<dataset>_history.yaml  # CTCE
-python run_experiment.py -e exp_specs/smac/mad_smac_<map>_ctde_<dataset>_history.yaml  # CTDE
+python run_experiment.py -e exp_specs/smac/<map>/mad_smac_<map>_attn_<dataset>_history.yaml  # CTCE
+python run_experiment.py -e exp_specs/smac/<map>/mad_smac_<map>_ctde_<dataset>_history.yaml  # CTDE
 ```
 
 To evaluate the trained model, first replace the `log_dir` with those need to be evaluated in `exp_specs/eval_inv.yaml` and run
