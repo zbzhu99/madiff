@@ -79,7 +79,7 @@ class ReplayBuffer:
         path_length = len(path["observations"])
         assert path_length <= self.max_path_length
 
-        # NOTE(zbzhu): agents must terminate together
+        # NOTE: agents must terminate together
         all_terminals = np.any(path["terminals"], axis=1)
         if all_terminals.any():
             assert (all_terminals[-1] == True) and (not all_terminals[:-1].any())

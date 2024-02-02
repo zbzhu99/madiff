@@ -1,4 +1,4 @@
-# TODO(zbzhu): Finish this
+# TODO: Finish this
 class MAMuJoCoRenderer:
     """
     default mamujoco renderer

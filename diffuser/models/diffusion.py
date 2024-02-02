@@ -29,7 +29,6 @@ class GaussianDiffusion(nn.Module):
         loss_weights=None,
         returns_condition=False,
         condition_guidance_w=0.1,
-        agent_share_noise=False,
         data_encoder=utils.IdentityEncoder(),
         **kwargs,
     ):
@@ -43,7 +42,6 @@ class GaussianDiffusion(nn.Module):
         self.model = model
         self.returns_condition = returns_condition
         self.condition_guidance_w = condition_guidance_w
-        self.agent_share_noise = agent_share_noise
         self.data_encoder = data_encoder
 
         betas = cosine_beta_schedule(n_timesteps)
@@ -209,11 +207,7 @@ class GaussianDiffusion(nn.Module):
 
         batch_size = shape[0]
         # low temperature sampling; alpha equals 0.5
-        if self.agent_share_noise:
-            x = 0.5 * torch.randn((shape[0], shape[1], shape[3]), device=device)
-            x = torch.stack([x for _ in range(shape[2])], dim=2)
-        else:
-            x = 0.5 * torch.randn(shape, device=device)
+        x = 0.5 * torch.randn(shape, device=device)
         x = apply_conditioning(x, cond, self.action_dim)
         x = self.data_encoder(x)
 
@@ -320,11 +314,7 @@ class GaussianDiffusion(nn.Module):
         return sample
 
     def p_losses(self, x_start, cond, t, returns=None):
-        if self.agent_share_noise:
-            noise = torch.randn_like(x_start[:, :, 0])
-            noise = torch.stack([noise for _ in range(x_start.shape[2])], dim=2)
-        else:
-            noise = torch.randn_like(x_start)
+        noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
@@ -393,7 +383,6 @@ class GaussianInvDynDiffusion(nn.Module):
         train_only_inv: bool = False,
         share_inv: bool = True,
         joint_inv: bool = False,
-        agent_share_noise: bool = False,
         data_encoder: utils.Encoder = utils.IdentityEncoder(),
         **kwargs,
     ):
@@ -424,7 +413,6 @@ class GaussianInvDynDiffusion(nn.Module):
         self.train_only_inv = train_only_inv
         self.share_inv = share_inv
         self.joint_inv = joint_inv
-        self.agent_share_noise = agent_share_noise
         self.data_encoder = data_encoder
 
         self.inv_model = self._build_inv_model(
@@ -774,11 +762,7 @@ class GaussianInvDynDiffusion(nn.Module):
         device = self.betas.device
 
         batch_size = shape[0]
-        if self.agent_share_noise:
-            x = 0.5 * torch.randn((shape[0], shape[1], shape[3]), device=device)
-            x = torch.stack([x for _ in range(shape[2])], dim=2)
-        else:
-            x = 0.5 * torch.randn(shape, device=device)
+        x = 0.5 * torch.randn(shape, device=device)
         x = apply_conditioning(x, cond, 0)
         x = self.data_encoder(x)
 
@@ -834,8 +818,8 @@ class GaussianInvDynDiffusion(nn.Module):
         horizon = horizon or self.horizon + self.history_horizon
         shape = (batch_size, horizon, self.n_agents, self.observation_dim)
 
-        # BUG(zbzhu): Dpm solver now samples very large values
-        # TODO(mhliu): Dpm solver does not use data encoder
+        # BUG: Dpm solver now samples very large values
+        # TODO: Dpm solver does not use data encoder
         if use_dpm_solver:
             assert not use_ddim_sample
             raise NotImplementedError
@@ -963,11 +947,7 @@ class GaussianInvDynDiffusion(nn.Module):
         device = self.betas.device
 
         batch_size = shape[0]
-        if self.agent_share_noise:
-            x = 0.5 * torch.randn((shape[0], shape[1], shape[3]), device=device)
-            x = torch.stack([x for _ in range(shape[2])], dim=2)
-        else:
-            x = 0.5 * torch.randn(shape, device=device)
+        x = 0.5 * torch.randn(shape, device=device)
         x = apply_conditioning(x, cond, 0)
         x = self.data_encoder(x)
 
@@ -1017,12 +997,7 @@ class GaussianInvDynDiffusion(nn.Module):
         env_ts=None,
         states=None,
     ):
-        if self.agent_share_noise:
-            print("\n\n!!! AGENT SHARE NOISE !!!\n\n")
-            noise = torch.randn_like(x_start[:, :, 0])
-            noise = torch.stack([noise for _ in range(x_start.shape[2])], dim=2)
-        else:
-            noise = torch.randn_like(x_start)
+        noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_noisy = apply_conditioning(x_noisy, cond, 0)
@@ -1073,7 +1048,7 @@ class GaussianInvDynDiffusion(nn.Module):
             opponent_loss_weight.scatter_(dim=2, index=indices, value=1)
             loss = loss * opponent_loss_weight
 
-        # TODO(zbzhu): Check these two '.mean()'
+        # TODO: Check these two '.mean()'
         loss = (
             (loss * loss_masks).mean(dim=[1, 2]) / loss_masks.mean(dim=[1, 2])
         ).mean()
@@ -1526,7 +1501,7 @@ class ActionGaussianDiffusion(nn.Module):
         raise NotImplementedError
         batch_size = len(list(cond.values())[0])
         shape = (batch_size, self.action_dim)
-        cond = cond[0]  # FIXME(zbzhu)
+        cond = cond[0]  # FIXME
         return self.p_sample_loop(shape, cond, returns, *args, **kwargs)
 
     def grad_p_sample(self, x, cond, t, returns=None):
@@ -1575,7 +1550,7 @@ class ActionGaussianDiffusion(nn.Module):
         raise NotImplementedError
         batch_size = len(list(cond.values())[0])
         shape = (batch_size, self.action_dim)
-        cond = cond[0]  # FIXME(zbzhu)
+        cond = cond[0]  # FIXME
         return self.p_sample_loop(shape, cond, returns, *args, **kwargs)
 
     # ------------------------------------------ training ------------------------------------------#
@@ -1620,13 +1595,12 @@ class ActionGaussianDiffusion(nn.Module):
 
 
 class ValueDiffusion(GaussianDiffusion):
-    def __init__(self, *args, clean_only=False, agent_share_noise=False, **kwargs):
+    def __init__(self, *args, clean_only=False, **kwargs):
         assert "value" in kwargs["loss_type"]
         super().__init__(*args, **kwargs)
         if clean_only:
             print("[ models/diffusion ] Info: Only train on clean samples!")
         self.clean_only = clean_only
-        self.agent_share_noise = agent_share_noise
         self.sqrt_alphas_cumprod = torch.cat(
             [
                 torch.ones(1, device=self.betas.device),
@@ -1653,11 +1627,7 @@ class ValueDiffusion(GaussianDiffusion):
 
         else:
             t = t + 1
-            if self.agent_share_noise:
-                noise = torch.randn_like(x_start[:, :, 0])
-                noise = torch.stack([noise for _ in range(x_start.shape[2])], dim=2)
-            else:
-                noise = torch.randn_like(x_start)
+            noise = torch.randn_like(x_start)
 
             # since self.sqrt_alphas_cumprod and xxx is changed in __init__(),
             # x_noisy here is x_t_minus_1

@@ -173,7 +173,7 @@ class MPERenderer:
 
 
 def set_state(env, state):
-    # FIXME(zbzhu): this is a hack
+    # FIXME: this is a hack
     if env.metadata["name"] in ["simple_tag", "simple_world"]:
         agents = env.world.agents[:-1]
     else:

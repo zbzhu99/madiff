@@ -48,7 +48,7 @@ def atmost_2d(x):
 
 
 def update_agent_obs_to_states(env, env_states, agent_observations):
-    # NOTE(zbzhu): only support ma halfcheetah now
+    # NOTE: only support ma halfcheetah now
     assert (
         len(env_states) == agent_observations.shape[0]
     ), f"{len(env_states)} != {agent_observations.shape[0]}"

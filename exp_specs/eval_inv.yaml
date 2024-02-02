@@ -5,8 +5,8 @@ meta_data:
 
 variables:
   log_dir: [
-    "logs/mad_smac/3m-Good/h_20-hh_8-models.SharedConvAttentionDeconv-r_20-guidew_1.2-dl_datasets.HistoryCondSequenceDataset-retcond_True/100",
-    "logs/mad_smac/3m-Good/h_20-hh_8-models.SharedConvAttentionDeconv-r_20-guidew_1.2-dl_datasets.HistoryCondSequenceDataset-retcond_True/200",
+    "logs/mad_smac/3m-Good/h_20-hh_8-models.SharedConvAttentionDeconv-r_20-guidew_1.2-dl_datasets.SequenceDataset-retcond_True/100",
+    "logs/mad_smac/3m-Good/h_20-hh_8-models.SharedConvAttentionDeconv-r_20-guidew_1.2-dl_datasets.SequenceDataset-retcond_True/200",
   ]
 
 constants:

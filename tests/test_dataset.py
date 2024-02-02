@@ -5,6 +5,7 @@ from diffuser.utils.training import cycle
 
 
 def test_history_conditioned_dataset():
+    raise NotImplementedError("This test needs to be rewritten")
     dataset = HistoryCondSequenceDataset(
         env_type="mpe",
         env="simple_spread-medium-replay",

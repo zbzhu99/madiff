@@ -16,13 +16,6 @@ def main(Config, RUN):
     utils.set_seed(Config.seed)
     dataset_extra_kwargs = dict()
 
-    if "CTDE" in Config.loader:
-        dataset_extra_kwargs["mask_others"] = getattr(Config, "mask_others", False)
-        if "History" in Config.loader:
-            dataset_extra_kwargs["mask_others_history"] = getattr(
-                Config, "mask_others_history", False
-            )
-
     # configs that does not exist in old yaml files
     Config.use_state = getattr(Config, "use_state", False)
     Config.discrete_action = getattr(Config, "discrete_action", False)
@@ -197,7 +190,6 @@ def main(Config, RUN):
             loss_discount=Config.loss_discount,
             returns_condition=Config.returns_condition,
             condition_guidance_w=Config.condition_guidance_w,
-            agent_share_noise=Config.agent_share_noise,
             data_encoder=data_encoder,
             device=Config.device,
         )

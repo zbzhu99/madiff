@@ -24,7 +24,7 @@ class StackWrapper(gym.Wrapper):
 class PretrainedPreyWrapper(gym.Wrapper):
     def __init__(self, env: gym.Env, scenario_name: str):
         assert scenario_name in ["simple_tag", "simple_world"], scenario_name
-        # XXX(zbzhu): Pass in `device` as an argument?
+        # XXX: Pass in `device` as an argument?
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.prey = DDPGAgent(
             num_in_pol=env.observation_space[-1].shape[0],
