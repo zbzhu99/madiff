@@ -25,6 +25,7 @@ class ConvAttentionDeconv(nn.Module):
         transition_dim: int,
         state_dim: int,
         dim: int = 128,
+        history_horizon: int = 0,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
         n_agents: int = 2,
         use_state: bool = False,
@@ -35,11 +36,14 @@ class ConvAttentionDeconv(nn.Module):
         residual_attn: bool = True,
         use_layer_norm: bool = False,
         max_path_length: int = 100,
+        use_temporal_attention: bool = True,
     ):
         super().__init__()
 
         self.n_agents = n_agents
         self.use_state = use_state
+        self.history_horizon = history_horizon
+        self.use_temporal_attention = use_temporal_attention
 
         self.returns_condition = returns_condition
         self.env_ts_condition = env_ts_condition
@@ -51,6 +55,7 @@ class ConvAttentionDeconv(nn.Module):
             [
                 TemporalUnet(
                     horizon=horizon,
+                    history_horizon=history_horizon,
                     transition_dim=transition_dim,
                     dim=dim,
                     dim_mults=dim_mults,
@@ -67,6 +72,7 @@ class ConvAttentionDeconv(nn.Module):
         if self.use_state:
             self.state_net = TemporalUnet(
                 horizon=horizon,
+                history_horizon=history_horizon,
                 transition_dim=state_dim,
                 dim=dim,
                 dim_mults=dim_mults,
@@ -77,25 +83,49 @@ class ConvAttentionDeconv(nn.Module):
                 kernel_size=kernel_size,
             )
 
-        self.self_attn = [
-            SelfAttention(
-                in_out[-1][1],
-                in_out[-1][1] // 16,
-                in_out[-1][1] // 4,
-                use_state=use_state,
-                residual=residual_attn,
-            )
-        ]
-        for dims in reversed(in_out):
-            self.self_attn.append(
+        if self.use_temporal_attention:
+            print("\n USE TEMPORAL ATTENTION !!! \n")
+            AttentionModule = TemporalSelfAttention
+
+            self.self_attn = [
+                AttentionModule(
+                    in_out[-1][1],
+                    in_out[-1][1] // 16,
+                    in_out[-1][1] // 4,
+                    residual=residual_attn,
+                    embed_dim=self.net.embed_dim,
+                )
+            ]
+            for dims in reversed(in_out):
+                self.self_attn.append(
+                    AttentionModule(
+                        dims[1],
+                        dims[1] // 16,
+                        dims[1] // 4,
+                        residual=residual_attn,
+                        embed_dim=self.net.embed_dim,
+                    )
+                )
+        else:
+            self.self_attn = [
                 SelfAttention(
-                    dims[1],
-                    dims[1] // 16,
-                    dims[1] // 4,
+                    in_out[-1][1],
+                    in_out[-1][1] // 16,
+                    in_out[-1][1] // 4,
                     use_state=use_state,
                     residual=residual_attn,
                 )
-            )
+            ]
+            for dims in reversed(in_out):
+                self.self_attn.append(
+                    SelfAttention(
+                        dims[1],
+                        dims[1] // 16,
+                        dims[1] // 4,
+                        use_state=use_state,
+                        residual=residual_attn,
+                    )
+                )
         self.self_attn = nn.ModuleList(self.self_attn)
 
         self.use_layer_norm = use_layer_norm
@@ -398,7 +428,7 @@ class SharedConvAttentionDeconv(nn.Module):
         residual_attn: bool = True,
         use_layer_norm: bool = False,
         max_path_length: int = 100,
-        use_temporal_attention: bool = False,
+        use_temporal_attention: bool = True,
     ):
         super().__init__()
 

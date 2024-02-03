@@ -141,13 +141,12 @@ demos
 reference_repos/
 *.png
 wandb/
-data/
 *.pkl
 *.pt
 .charts.yml
 *.jsonl
-analysis/diffuser/
 *.pdf
 *.jpg
 *.json
 __MACOSX/
+diffuser/datasets/data

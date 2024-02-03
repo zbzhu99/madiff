@@ -18,7 +18,7 @@ discount: 0.99
 ema_decay: 0.995
 evaluator: utils.MADEvaluator
 num_eval: 10
-eval_freq: 0
+eval_freq: 100000
 env_type: mpe
 exp_id: 0
 exp_name: mad_mpe_test
@@ -27,7 +27,7 @@ hidden_dim: 256
 history_horizon: 0
 horizon: 24
 include_returns: true
-job_name: '{dataset}/h_{horizon}-{model}-r_{returns_scale}-guidew_{condition_guidance_w}-dl_{loader}-retcond_{returns_condition}'
+job_name: '{dataset}/h_{horizon}-{model}-r_{returns_scale}-guidew_{condition_guidance_w}-retcond_{returns_condition}'
 learning_rate: 0.0002
 loader: datasets.SequenceDataset
 log_freq: 1000

@@ -2,7 +2,7 @@ meta_data:
   exp_name: "mad_mpe"
   script_path: "run_scripts/train.py"
   num_workers: 3
-  job_name: "{dataset}/h_{horizon}-{model}-r_{returns_scale}-guidew_{condition_guidance_w}-dl_{loader}-retcond_{returns_condition}"
+  job_name: "{dataset}/h_{horizon}-{model}-r_{returns_scale}-guidew_{condition_guidance_w}-ctde_{decentralized_execution}"
 
 variables:
   seed: [100, 200, 300, 400, 500]

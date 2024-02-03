@@ -2,7 +2,7 @@ meta_data:
   exp_name: "mad_mpe"
   script_path: "run_scripts/train.py"
   num_workers: 2
-  job_name: "{dataset}/h_{horizon}-{model}-r_{returns_scale}-guidew_{condition_guidance_w}-dl_{loader}-retcond_{returns_condition}"
+  job_name: "{dataset}/h_{horizon}-{model}-r_{returns_scale}-guidew_{condition_guidance_w}-ctde_{decentralized_execution}"
 
 variables:
   seed: [100, 200, 300, 400, 500]
@@ -26,7 +26,7 @@ constants:
   n_ddim_steps: 15
 
   # model
-  model: "models.ConvAttentionDeconv"
+  model: "models.SharedConvAttentionDeconv"
   diffusion: "models.GaussianInvDynDiffusion"
   share_inv: False
   history_horizon: 0
@@ -50,7 +50,8 @@ constants:
 
   # dataset
   loader: "datasets.SequenceDataset"
-  normalizer: "CDFNormalizer"
+  # normalizer: "CDFNormalizer"
+  normalizer: "LimitsNormalizer"
   max_n_episodes: 200000
   preprocess_fns: []
   use_padding: True

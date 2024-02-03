@@ -376,28 +376,12 @@ class Trainer(object):
             batch = self.dataloader_vis.__next__()
             conditions = to_device(batch["cond"], self.device)
             # repeat each item in conditions `n_samples` times
-            if len(list(conditions.values())[0].shape) == 3:
-                conditions = apply_dict(
-                    einops.repeat,
-                    conditions,
-                    "b a d -> (repeat b) a d",
-                    repeat=n_samples,
-                )
-            elif len(list(conditions.values())[0].shape) == 4:  # history-cond w. CTCE
-                conditions = apply_dict(
-                    einops.repeat,
-                    conditions,
-                    "b h a d -> (repeat b) h a d",
-                    repeat=n_samples,
-                )
-            else:
-                conditions = apply_dict(
-                    einops.repeat,
-                    conditions,
-                    "b d -> (repeat b) d",
-                    repeat=n_samples,
-                )
-
+            conditions = apply_dict(
+                einops.repeat,
+                conditions,
+                "b ... -> (repeat b) ...",
+                repeat=n_samples,
+            )
             # [ n_samples x horizon x n_agents x (action_dim + observation_dim) ]
             if self.ema_model.returns_condition:
                 returns = to_device(
