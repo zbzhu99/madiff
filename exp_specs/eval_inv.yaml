@@ -10,9 +10,10 @@ variables:
   ]
 
 constants:
-  load_steps: [0, 50000, 100000, 150000, 200000, 250000, 300000, 350000, 400000, 450000, 500000, 550000, 600000, 650000, 700000, 750000, 800000, 850000, 900000, 950000] # , 1000000]
+  load_steps: [500000]
   num_eval: 10
   num_envs: 10
   evaluator: "utils.MADEvaluator"
   overwrite: True
-  use_ddim_sample: False
+  use_ddim_sample: True
+  n_ddim_steps: 15

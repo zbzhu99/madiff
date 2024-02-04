@@ -27,15 +27,18 @@ def main(Config, RUN):
     Config.env_ts_condition = getattr(Config, "env_ts_condition", False)
     Config.use_return_to_go = getattr(Config, "use_return_to_go", False)
     Config.joint_inv = getattr(Config, "joint_inv", False)
+    Config.use_zero_padding = getattr(Config, "use_zero_padding", True)
+    Config.use_inv_dyn = getattr(Config, "use_inv_dyn", True)
+    Config.pred_future_padding = getattr(Config, "pred_future_padding", False)
+    if not hasattr(Config, "agent_condition_type"):
+        if Config.decentralized_execution:
+            Config.agent_condition_type = "single"
+        else:
+            Config.agent_condition_type = "all"
 
     # -----------------------------------------------------------------------------#
     # ---------------------------------- dataset ----------------------------------#
     # -----------------------------------------------------------------------------#
-    if Config.diffusion == "models.GaussianInvDynDiffusion":
-        use_inverse_dynamic = True
-    else:
-        use_inverse_dynamic = False
-
     dataset_config = utils.Config(
         Config.loader,
         savepath="dataset_config.pkl",
@@ -62,8 +65,11 @@ def main(Config, RUN):
         ).agent_share_parameters,
         use_seed_dataset=Config.use_seed_dataset,
         seed=Config.seed,
-        use_inverse_dynamic=use_inverse_dynamic,
+        use_inv_dyn=Config.use_inv_dyn,
         decentralized_execution=Config.decentralized_execution,
+        use_zero_padding=Config.use_zero_padding,
+        agent_condition_type=Config.agent_condition_type,
+        pred_future_padding=Config.pred_future_padding,
         **dataset_extra_kwargs,
     )
 
@@ -91,108 +97,57 @@ def main(Config, RUN):
     # -----------------------------------------------------------------------------#
     # ------------------------------ model & trainer ------------------------------#
     # -----------------------------------------------------------------------------#
-    if Config.diffusion == "models.GaussianInvDynDiffusion":
-        if Config.model == "transformer_models.MATransformerTemporalModel":
-            model_config = utils.Config(
-                Config.model,
-                savepath="model_config.pkl",
-                n_agents=Config.n_agents,
-                horizon=Config.horizon + Config.history_horizon,
-                transition_dim=observation_dim,
-                returns_condition=Config.returns_condition,
-                env_ts_condition=Config.env_ts_condition,
-                condition_dropout=Config.condition_dropout,
-                max_path_length=Config.max_path_length,
-                device=Config.device,
-            )
-        else:
-            model_config = utils.Config(
-                Config.model,
-                savepath="model_config.pkl",
-                n_agents=Config.n_agents,
-                horizon=Config.horizon + Config.history_horizon,
-                history_horizon=Config.history_horizon,
-                transition_dim=observation_dim,
-                state_dim=state_dim,
-                dim_mults=Config.dim_mults,
-                returns_condition=Config.returns_condition,
-                env_ts_condition=Config.env_ts_condition,
-                use_state=Config.use_state,
-                dim=Config.dim,
-                condition_dropout=Config.condition_dropout,
-                residual_attn=Config.residual_attn,
-                max_path_length=Config.max_path_length,
-                use_temporal_attention=Config.use_temporal_attention,
-                device=Config.device,
-            )
+    model_config = utils.Config(
+        Config.model,
+        savepath="model_config.pkl",
+        n_agents=Config.n_agents,
+        horizon=Config.horizon + Config.history_horizon,
+        history_horizon=Config.history_horizon,
+        transition_dim=observation_dim,
+        state_dim=state_dim,
+        dim_mults=Config.dim_mults,
+        returns_condition=Config.returns_condition,
+        env_ts_condition=Config.env_ts_condition,
+        use_state=Config.use_state,
+        dim=Config.dim,
+        condition_dropout=Config.condition_dropout,
+        residual_attn=Config.residual_attn,
+        max_path_length=Config.max_path_length,
+        use_temporal_attention=Config.use_temporal_attention,
+        device=Config.device,
+    )
 
-        diffusion_config = utils.Config(
-            Config.diffusion,
-            savepath="diffusion_config.pkl",
-            n_agents=Config.n_agents,
-            horizon=Config.horizon,
-            history_horizon=Config.history_horizon,
-            observation_dim=observation_dim,
-            action_dim=action_dim,
-            state_dim=state_dim,
-            use_state=Config.use_state,
-            discrete_action=Config.discrete_action,
-            num_actions=getattr(dataset.env, "num_actions", 0),
-            n_timesteps=Config.n_diffusion_steps,
-            loss_type=Config.loss_type,
-            clip_denoised=Config.clip_denoised,
-            predict_epsilon=Config.predict_epsilon,
-            hidden_dim=Config.hidden_dim,
-            ar_inv=Config.ar_inv,
-            train_only_inv=Config.train_only_inv,
-            share_inv=Config.share_inv,
-            joint_inv=Config.joint_inv,
-            # loss weighting
-            action_weight=Config.action_weight,
-            loss_weights=Config.loss_weights,
-            state_loss_weight=Config.state_loss_weight,
-            opponent_loss_weight=Config.opponent_loss_weight,
-            loss_discount=Config.loss_discount,
-            returns_condition=Config.returns_condition,
-            condition_guidance_w=Config.condition_guidance_w,
-            data_encoder=data_encoder,
-            device=Config.device,
-        )
-
-    else:
-        model_config = utils.Config(
-            Config.model,
-            savepath="model_config.pkl",
-            n_agents=Config.n_agents,
-            horizon=Config.horizon + Config.history_horizon,
-            transition_dim=observation_dim + action_dim,
-            dim_mults=Config.dim_mults,
-            returns_condition=Config.returns_condition,
-            dim=Config.dim,
-            condition_dropout=Config.condition_dropout,
-            device=Config.device,
-        )
-
-        diffusion_config = utils.Config(
-            Config.diffusion,
-            savepath="diffusion_config.pkl",
-            horizon=Config.horizon + Config.history_horizon,
-            n_agents=Config.n_agents,
-            observation_dim=observation_dim,
-            action_dim=action_dim,
-            n_timesteps=Config.n_diffusion_steps,
-            loss_type=Config.loss_type,
-            clip_denoised=Config.clip_denoised,
-            predict_epsilon=Config.predict_epsilon,
-            # loss weighting
-            action_weight=Config.action_weight,
-            loss_weights=Config.loss_weights,
-            loss_discount=Config.loss_discount,
-            returns_condition=Config.returns_condition,
-            condition_guidance_w=Config.condition_guidance_w,
-            data_encoder=data_encoder,
-            device=Config.device,
-        )
+    diffusion_config = utils.Config(
+        Config.diffusion,
+        savepath="diffusion_config.pkl",
+        n_agents=Config.n_agents,
+        horizon=Config.horizon,
+        history_horizon=Config.history_horizon,
+        observation_dim=observation_dim,
+        action_dim=action_dim,
+        state_dim=state_dim,
+        use_state=Config.use_state,
+        discrete_action=Config.discrete_action,
+        num_actions=getattr(dataset.env, "num_actions", 0),
+        n_timesteps=Config.n_diffusion_steps,
+        clip_denoised=Config.clip_denoised,
+        predict_epsilon=Config.predict_epsilon,
+        hidden_dim=Config.hidden_dim,
+        train_only_inv=Config.train_only_inv,
+        share_inv=Config.share_inv,
+        joint_inv=Config.joint_inv,
+        # loss weighting
+        action_weight=Config.action_weight,
+        loss_weights=Config.loss_weights,
+        state_loss_weight=Config.state_loss_weight,
+        opponent_loss_weight=Config.opponent_loss_weight,
+        loss_discount=Config.loss_discount,
+        returns_condition=Config.returns_condition,
+        condition_guidance_w=Config.condition_guidance_w,
+        data_encoder=data_encoder,
+        use_inv_dyn=Config.use_inv_dyn,
+        device=Config.device,
+    )
 
     trainer_config = utils.Config(
         utils.Trainer,

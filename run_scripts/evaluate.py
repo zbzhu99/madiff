@@ -42,6 +42,8 @@ def evaluate(Config):
                 num_eval=Config.num_eval,
                 num_envs=getattr(Config, "num_envs", Config.num_eval),
                 condition_guidance_w=Config.condition_guidance_w,
+                use_ddim_sample=Config.use_ddim_sample,
+                n_ddim_steps=Config.n_ddim_steps,
             )
 
         evaluator.evaluate(load_step=load_step)

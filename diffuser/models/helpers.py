@@ -215,60 +215,18 @@ def extract(a, t, x_shape):
     return out.reshape(b, *((1,) * (len(x_shape) - 1)))
 
 
-def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):
-    """
-    cosine schedule
-    as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
-    """
-    steps = timesteps + 1
-    x = np.linspace(0, steps, steps)
-    alphas_cumprod = np.cos(((x / steps) + s) / (1 + s) * np.pi * 0.5) ** 2
-    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
-    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
-    betas_clipped = np.clip(betas, a_min=0, a_max=0.999)
-    return torch.tensor(betas_clipped, dtype=dtype)
+def apply_conditioning(x, conditions):
+    cond_masks = conditions["masks"].to(bool)
+    x[cond_masks] = conditions["x"][cond_masks].clone()
 
-
-def apply_conditioning(x, conditions, action_dim):
-    # Flag variable to check if normal conditions are applied before setting
-    # player_idxs or player_hoop_sides.
-    apply_basic_cond = False
-    for t, val in conditions.items():
-        if isinstance(t, str):
-            if t == "player_idxs":
-                assert apply_basic_cond
-                if x.shape[-1] < 4:  # pure position information w.o. player info
-                    x = torch.cat([val, x], dim=-1)
-                else:
-                    x[:, :, :, 0] = val
-            elif t == "player_hoop_sides":
-                assert apply_basic_cond
-                if x.shape[-1] < 4:  # pure position information w.o. player info
-                    x = torch.cat([x, val], dim=-1)
-                else:
-                    x[:, :, :, -1] = val
-            else:
-                continue
-
-        elif isinstance(t, int):
-            x[:, t, :, action_dim:] = val.clone()
-            apply_basic_cond = True
-        elif isinstance(t, tuple) or isinstance(t, list):
-            assert len(t) == 2, t
-            cond_value = val.clone()
-            if "agent_idx" in conditions:
-                x[:, t[0] : t[1] - 1, :, action_dim:] = cond_value[:, :-1]
-                index = (
-                    conditions["agent_idx"]
-                    .long()
-                    .repeat(1, 1, x.shape[-1] - action_dim)
-                )
-                x[:, t[1] - 1].scatter_(1, index, cond_value[:, -1].gather(1, index))
-            else:
-                x[:, t[0] : t[1], :, action_dim:] = cond_value
-            apply_basic_cond = True
+    if "player_idxs" in conditions.keys():
+        if x.shape[-1] < 4:  # pure position information w.o. player info
+            x = torch.cat([conditions["player_idxs"], x], dim=-1)
+            x = torch.cat([x, conditions["player_hoop_sides"]], dim=-1)
         else:
-            raise TypeError(type(t))
+            x[:, :, :, 0] = conditions["player_idxs"]
+            x[:, :, :, -1] = conditions["player_hoop_sides"]
+
     return x
 
 

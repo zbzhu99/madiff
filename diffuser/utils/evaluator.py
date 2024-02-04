@@ -1,17 +1,18 @@
+from typing import Optional
 import gc
-import importlib
 import multiprocessing
 import os
 import pickle
 import sys
 import time
+import importlib
 from collections import deque
-from copy import copy, deepcopy
+from copy import deepcopy, copy
 from multiprocessing import Pipe, connection
 from multiprocessing.context import Process
 
-import einops
 import numpy as np
+import einops
 import torch
 from ml_logger import logger
 
@@ -47,35 +48,52 @@ class MADEvaluatorWorker(Process):
         )
         attention_masks[:, Config.history_horizon :] = 1.0
 
+        shape = (
+            obs.shape[0],
+            Config.horizon + Config.history_horizon,
+            *obs.shape[-2:],
+        )  # b t a f
         if Config.decentralized_execution:
-            joint_obs, joint_attention_masks, agent_idx = [], [], []
+            joint_cond_trajectories, joint_cond_masks, joint_attention_masks = (
+                [],
+                [],
+                [],
+            )
             for a_idx in range(Config.n_agents):
-                local_obs = np.zeros_like(obs)  # b t a f
-                local_obs[:, :, a_idx] = obs[:, :, a_idx]
+                local_cond_trajectories = np.zeros(shape, dtype=obs.dtype)
+                local_cond_trajectories[:, : Config.history_horizon + 1, a_idx] = obs[
+                    :, :, a_idx
+                ]
+
+                agent_mask = np.zeros(Config.n_agents)
+                agent_mask[a_idx] = 1.0
+                local_cond_masks = self.mask_generator(shape, agent_mask)
 
                 local_attention_masks = copy(attention_masks)
                 local_attention_masks[:, : Config.history_horizon, a_idx] = 1.0
 
-                joint_obs.append(to_torch(local_obs, device=Config.device))
+                joint_cond_trajectories.append(
+                    to_torch(local_cond_trajectories, device=Config.device)
+                )
+                joint_cond_masks.append(
+                    to_torch(local_cond_masks, device=Config.device)
+                )
                 joint_attention_masks.append(
                     to_torch(local_attention_masks, device=Config.device)
                 )
-                agent_idx.append(
-                    to_torch([[a_idx]], device=Config.device).repeat(obs.shape[0], 1, 1)
-                )
 
+            joint_cond_trajectories = einops.rearrange(
+                torch.stack(joint_cond_trajectories, dim=1), "b a ... -> (b a) ..."
+            )
+            joint_cond_masks = einops.rearrange(
+                torch.stack(joint_cond_masks, dim=1), "b a ... -> (b a) ..."
+            )
             joint_attention_masks = einops.rearrange(
                 torch.stack(joint_attention_masks, dim=1), "b a ... -> (b a) ..."
             )
-            joint_obs = einops.rearrange(
-                torch.stack(joint_obs, dim=1), "b a ... -> (b a) ..."
-            )
-            agent_idx = einops.rearrange(
-                torch.stack(agent_idx, dim=1), "b a ... -> (b a) ..."
-            )
             conditions = {
-                (0, Config.history_horizon + 1): joint_obs,
-                "agent_idx": agent_idx,
+                "x": joint_cond_trajectories,
+                "masks": joint_cond_masks,
             }
             returns = einops.repeat(returns, "b ... -> (b a) ...", a=Config.n_agents)
             env_ts = einops.repeat(env_ts, "b ... -> (b a) ...", a=Config.n_agents)
@@ -96,8 +114,13 @@ class MADEvaluatorWorker(Process):
             samples = torch.stack(samples, dim=-2)
 
         else:
+            cond_trajectories = np.zeros(shape, dtype=obs.dtype)
+            cond_trajectories[:, : Config.history_horizon + 1] = obs
+            agent_mask = np.ones(Config.n_agents)
+            cond_masks = self.mask_generator(shape, agent_mask)
             conditions = {
-                (0, Config.history_horizon + 1): to_torch(obs, device=Config.device)
+                "x": to_torch(cond_trajectories, device=Config.device),
+                "masks": to_torch(cond_masks, device=Config.device),
             }
             attention_masks[:, : Config.history_horizon] = 1.0
             attention_masks = to_torch(attention_masks, device=Config.device)
@@ -111,7 +134,7 @@ class MADEvaluatorWorker(Process):
         samples = samples[:, Config.history_horizon :]
         return samples
 
-    def _evaluate(self, load_step=None):
+    def _evaluate(self, load_step: Optional[int] = None):
         assert (
             self.initialized is True
         ), "Evaluator should be initialized before evaluation."
@@ -238,7 +261,13 @@ class MADEvaluatorWorker(Process):
         else:
             print("\nDo NOT use history conditioning\n")
         obs_queue = deque(maxlen=Config.history_horizon + 1)
-        obs_queue.extend([np.zeros_like(obs) for _ in range(Config.history_horizon)])
+        if Config.use_zero_padding:
+            obs_queue.extend(
+                [np.zeros_like(obs) for _ in range(Config.history_horizon)]
+            )
+        else:
+            normed_obs = self.normalizer.normalize(obs, "observations")
+            obs_queue.extend([normed_obs for _ in range(Config.history_horizon)])
 
         while sum(dones) < num_episodes:
             obs = self.normalizer.normalize(obs, "observations")
@@ -252,13 +281,13 @@ class MADEvaluatorWorker(Process):
 
             if Config.share_inv or Config.joint_inv:
                 if Config.joint_inv:
-                    action = self.trainer.ema_model.inv_model(
+                    actions = self.trainer.ema_model.inv_model(
                         obs_comb.reshape(obs_comb.shape[0], -1)
                     ).reshape(obs_comb.shape[0], obs_comb.shape[1], -1)
                 else:
-                    action = self.trainer.ema_model.inv_model(obs_comb)
+                    actions = self.trainer.ema_model.inv_model(obs_comb)
             else:
-                action = torch.stack(
+                actions = torch.stack(
                     [
                         self.trainer.ema_model.inv_model[i](obs_comb[:, i])
                         for i in range(Config.n_agents)
@@ -267,16 +296,16 @@ class MADEvaluatorWorker(Process):
                 )
 
             samples = to_np(samples)
-            action = to_np(action)
+            actions = to_np(actions)
 
             if self.discrete_action:
                 legal_action = np.stack(
                     [env.get_legal_actions() for env in self.env_list], axis=0
                 )
-                action[np.where(legal_action.astype(int) == 0)] = -np.inf
-                action = np.argmax(action, axis=-1)
+                actions[np.where(legal_action.astype(int) == 0)] = -np.inf
+                actions = np.argmax(actions, axis=-1)
             else:
-                action = self.normalizer.unnormalize(action, "actions")
+                actions = self.normalizer.unnormalize(actions, "actions")
 
             if t == 0:
                 normed_observations = samples[:, :, :, :]
@@ -292,7 +321,7 @@ class MADEvaluatorWorker(Process):
                     obs_list.append(obs[i, 0][None])
                 else:
                     this_obs, this_reward, this_done, this_info = self.env_list[i].step(
-                        action[i]
+                        actions[i]
                     )
                     obs_list.append(this_obs[None])
 
@@ -329,7 +358,9 @@ class MADEvaluatorWorker(Process):
         else:
             return recorded_obs, episode_rewards
 
-    def _init(self, log_dir, condition_guidance_w=None, **kwargs):
+    def _init(
+        self, log_dir: str, condition_guidance_w: Optional[float] = None, **kwargs
+    ):
         assert self.initialized is False, "Evaluator can only be initialized once."
 
         self.log_dir = log_dir
@@ -340,6 +371,7 @@ class MADEvaluatorWorker(Process):
         self.Config = Config = build_config_from_dict(kwargs, Config)
         self.Config.joint_inv = getattr(Config, "joint_inv", False)
         self.Config.use_return_to_go = getattr(Config, "use_return_to_go", False)
+        self.Config.use_ddim_sample = getattr(Config, "use_ddim_sample", False)
         self.Config.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         )
@@ -370,6 +402,7 @@ class MADEvaluatorWorker(Process):
 
         dataset = dataset_config()
         self.normalizer = dataset.normalizer
+        self.mask_generator = dataset.mask_generator
         del dataset
         gc.collect()
 
@@ -377,6 +410,11 @@ class MADEvaluatorWorker(Process):
         model = model_config()
         diffusion = diffusion_config(model)
         self.trainer = trainer_config(diffusion, None, renderer)
+
+        if Config.use_ddim_sample:
+            print(f"\n Use DDIM Sampler of {Config.n_ddim_steps} Step(s) \n")
+            self.trainer.model.set_ddim_scheduler(Config.n_ddim_steps)
+            self.trainer.ema_model.set_ddim_scheduler(Config.n_ddim_steps)
 
         self.discrete_action = False
         if Config.env_type == "smac" or Config.env_type == "smacv2":

@@ -2,7 +2,7 @@ meta_data:
   exp_name: "mad_smac"
   script_path: "run_scripts/train.py"
   num_workers: 2
-  job_name: "{dataset}/h_{horizon}-hh_{history_horizon}-{model}-r_{returns_scale}-guidew_{condition_guidance_w}-retcond_{returns_condition}"
+  job_name: "{dataset}/h_{horizon}-hh_{history_horizon}-{model}-r_{returns_scale}-guidew_{condition_guidance_w}-ctde_{decentralized_execution}"
 
 variables:
   seed: [100, 200, 300]
@@ -29,7 +29,7 @@ constants:
 
   # model
   model: "models.SharedConvAttentionDeconv"
-  diffusion: "models.GaussianInvDynDiffusion"
+  diffusion: "models.GaussianDiffusion"
   share_inv: True
   n_diffusion_steps: 200
   action_weight: 10
@@ -43,7 +43,6 @@ constants:
   hidden_dim: 256
   condition_dropout: 0.25
   condition_guidance_w: 1.2
-  ar_inv: False
   train_only_inv: False
   clip_denoised: True
   test_ret: 0.9
@@ -61,7 +60,6 @@ constants:
 
   # training
   n_steps_per_epoch: 10000
-  loss_type: "l2"
   n_train_steps: 1000000
   batch_size: 32
   learning_rate: 0.0002

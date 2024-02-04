@@ -17,6 +17,7 @@ class ReplayBuffer:
         max_path_length: int,
         termination_penalty: float,
         global_feats: List[str] = ["states"],
+        use_zero_padding: bool = True,
     ):
         self._dict = {
             "path_lengths": np.zeros(max_n_episodes, dtype=int),
@@ -27,6 +28,7 @@ class ReplayBuffer:
         self.max_path_length = max_path_length
         self.termination_penalty = termination_penalty
         self.global_feats = global_feats
+        self.use_zero_padding = use_zero_padding
 
     def __repr__(self):
         return "[ datasets/buffer ] Fields:\n" + "\n".join(
@@ -79,10 +81,10 @@ class ReplayBuffer:
         path_length = len(path["observations"])
         assert path_length <= self.max_path_length
 
-        # NOTE: agents must terminate together
+        # NOTE(zbzhu): agents must terminate together
         all_terminals = np.any(path["terminals"], axis=1)
         if all_terminals.any():
-            assert (all_terminals[-1] == True) and (not all_terminals[:-1].any())
+            assert (bool(all_terminals[-1]) is True) and (not all_terminals[:-1].any())
 
         # if first path added, set keys based on contents
         self._add_keys(path)
@@ -95,6 +97,8 @@ class ReplayBuffer:
                 array = atleast_nd(path[key], n=3)
             if key not in self._dict:
                 self._allocate(key, array)
+            if not self.use_zero_padding and key not in ["rewards"]:
+                self._dict[key][self._count] = array[-1]
             self._dict[key][self._count, :path_length] = array
 
         # penalize early termination

@@ -7,6 +7,7 @@ import torch
 from diffuser.datasets.buffer import ReplayBuffer
 from diffuser.datasets.normalization import DatasetNormalizer
 from diffuser.datasets.preprocessing import get_preprocess_fn
+from diffuser.utils.mask_generator import MultiAgentMaskGenerator
 
 
 class SequenceDataset(torch.utils.data.Dataset):
@@ -33,13 +34,19 @@ class SequenceDataset(torch.utils.data.Dataset):
         agent_share_parameters: bool = False,
         use_seed_dataset: bool = False,
         decentralized_execution: bool = False,
-        use_inverse_dynamic: bool = True,
-        seed: int = None,
+        use_inv_dyn: bool = True,
+        use_zero_padding: bool = True,
+        agent_condition_type: str = "single",
+        pred_future_padding: bool = False,
+        seed: Optional[int] = None,
     ):
         if use_seed_dataset:
             assert (
                 env_type == "mpe"
             ), f"Seed dataset only supported for MPE, not {env_type}"
+
+        assert agent_condition_type in ["single", "all", "random"], agent_condition_type
+        self.agent_condition_type = agent_condition_type
 
         env_mod_name = {
             "d4rl": "diffuser.datasets.d4rl",
@@ -55,7 +62,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.env = env = env_mod.load_environment(env)
         self.global_feats = env.metadata["global_feats"]
 
-        self.use_inverse_dynamic = use_inverse_dynamic
+        self.use_inv_dyn = use_inv_dyn
         self.returns_scale = returns_scale
         self.n_agents = n_agents
         self.horizon = horizon
@@ -70,6 +77,8 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.include_env_ts = include_env_ts
         self.use_state = use_state
         self.decentralized_execution = decentralized_execution
+        self.use_zero_padding = use_zero_padding
+        self.pred_future_padding = pred_future_padding
 
         if env_type == "mpe":
             if use_seed_dataset:
@@ -87,8 +96,9 @@ class SequenceDataset(torch.utils.data.Dataset):
             max_path_length,
             termination_penalty,
             global_feats=self.global_feats,
+            use_zero_padding=self.use_zero_padding,
         )
-        for i, episode in enumerate(itr):
+        for _, episode in enumerate(itr):
             fields.add_path(episode)
         fields.finalize()
 
@@ -108,6 +118,12 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.path_lengths = fields.path_lengths
 
         self.indices = self.make_indices(fields.path_lengths)
+        self.mask_generator = MultiAgentMaskGenerator(
+            action_dim=self.action_dim,
+            observation_dim=self.observation_dim,
+            history_horizon=self.history_horizon,
+            action_visible=not use_inv_dyn,
+        )
 
         if self.discrete_action:
             # smac has discrete actions, so we only need to normalize observations
@@ -123,9 +139,9 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         print(fields)
 
-    def pad_future(self, keys=None):
+    def pad_future(self, keys: List[str] = None):
         if keys is None:
-            keys = ["normed_observations", "rewards"]
+            keys = ["normed_observations", "rewards", "terminals"]
             if "legal_actions" in self.fields.keys:
                 keys.append("legal_actions")
             if self.use_action:
@@ -139,20 +155,33 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         for key in keys:
             shape = self.fields[key].shape
-            self.fields[key] = np.concatenate(
-                [
-                    self.fields[key],
-                    np.zeros(
-                        (shape[0], self.horizon - 1, *shape[2:]),
-                        dtype=self.fields[key].dtype,
-                    ),
-                ],
-                axis=1,
-            )
+            if self.use_zero_padding:
+                self.fields[key] = np.concatenate(
+                    [
+                        self.fields[key],
+                        np.zeros(
+                            (shape[0], self.horizon - 1, *shape[2:]),
+                            dtype=self.fields[key].dtype,
+                        ),
+                    ],
+                    axis=1,
+                )
+            else:
+                self.fields[key] = np.concatenate(
+                    [
+                        self.fields[key],
+                        np.repeat(
+                            self.fields[key][:, -1:],
+                            self.horizon - 1,
+                            axis=1,
+                        ),
+                    ],
+                    axis=1,
+                )
 
-    def pad_history(self, keys=None):
+    def pad_history(self, keys: List[str] = None):
         if keys is None:
-            keys = ["normed_observations", "rewards"]
+            keys = ["normed_observations", "rewards", "terminals"]
             if "legal_actions" in self.fields.keys:
                 keys.append("legal_actions")
             if self.use_action:
@@ -166,16 +195,29 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         for key in keys:
             shape = self.fields[key].shape
-            self.fields[key] = np.concatenate(
-                [
-                    np.zeros(
-                        (shape[0], self.history_horizon, *shape[2:]),
-                        dtype=self.fields[key].dtype,
-                    ),
-                    self.fields[key],
-                ],
-                axis=1,
-            )
+            if self.use_zero_padding:
+                self.fields[key] = np.concatenate(
+                    [
+                        np.zeros(
+                            (shape[0], self.history_horizon, *shape[2:]),
+                            dtype=self.fields[key].dtype,
+                        ),
+                        self.fields[key],
+                    ],
+                    axis=1,
+                )
+            else:
+                self.fields[key] = np.concatenate(
+                    [
+                        np.repeat(
+                            self.fields[key][:, :1],
+                            self.history_horizon,
+                            axis=1,
+                        ),
+                        self.fields[key],
+                    ],
+                    axis=1,
+                )
 
     def normalize(self, keys: List[str] = None):
         """
@@ -192,7 +234,7 @@ class SequenceDataset(torch.utils.data.Dataset):
             normed = self.normalizer(array, key)
             self.fields[f"normed_{key}"] = normed.reshape(shape)
 
-    def make_indices(self, path_lengths):
+    def make_indices(self, path_lengths: np.ndarray):
         """
         makes indices for sampling from dataset;
         each index maps to a datapoint
@@ -215,36 +257,42 @@ class SequenceDataset(torch.utils.data.Dataset):
         indices = np.array(indices)
         return indices
 
-    def get_conditions(self, observations, agent_idx: Optional[int] = None):
+    def get_conditions(self, observations: np.ndarray, agent_idx: Optional[int] = None):
         """
         condition on current observations for planning
         """
 
         ret_dict = {}
-        if self.decentralized_execution:
+        # if self.decentralized_execution:
+        if self.agent_condition_type == "single":
             cond_observations = np.zeros_like(observations[: self.history_horizon + 1])
             cond_observations[:, agent_idx] = observations[
                 : self.history_horizon + 1, agent_idx
             ]
             ret_dict["agent_idx"] = torch.LongTensor([[agent_idx]])
-        else:
+        elif self.agent_condition_type == "all":
             cond_observations = observations[: self.history_horizon + 1]
         ret_dict[(0, self.history_horizon + 1)] = cond_observations
         return ret_dict
 
     def __len__(self):
-        if self.decentralized_execution:
+        if self.agent_condition_type == "single":
             return len(self.indices) * self.n_agents
         else:
             return len(self.indices)
 
-    def __getitem__(self, idx):
-        if self.decentralized_execution:
+    def __getitem__(self, idx: int, agent_idx: Optional[int] = None):
+        if self.agent_condition_type == "single":
             path_ind, start, end, mask_end = self.indices[idx // self.n_agents]
-            agent_idx = idx % self.n_agents
-        else:
+            agent_mask = np.zeros(self.n_agents, dtype=bool)
+            agent_mask[idx % self.n_agents] = 1
+        elif self.agent_condition_type == "all":
             path_ind, start, end, mask_end = self.indices[idx]
-            agent_idx = None
+            agent_mask = np.ones(self.n_agents, dtype=bool)
+        elif self.agent_condition_type == "random":
+            path_ind, start, end, mask_end = self.indices[idx]
+            # randomly generate 0 or 1 agent_masks
+            agent_mask = np.random.randint(0, 2, self.n_agents, dtype=bool)
 
         # shift by `self.history_horizon`
         history_start = start
@@ -261,30 +309,38 @@ class SequenceDataset(torch.utils.data.Dataset):
         if self.use_state:
             states = self.fields.normed_states[path_ind, history_start:end]
 
-        loss_masks = np.zeros((observations.shape[0], observations.shape[1], 1))
-        loss_masks[self.history_horizon : mask_end - history_start] = 1.0
-        if self.use_inverse_dynamic:
-            if self.decentralized_execution:
-                loss_masks[self.history_horizon, agent_idx] = 0.0
-            else:
-                loss_masks[self.history_horizon] = 0.0
-
-        attention_masks = np.zeros((observations.shape[0], observations.shape[1], 1))
-        attention_masks[self.history_horizon : mask_end - history_start] = 1.0
-        if self.decentralized_execution:
-            attention_masks[: self.history_horizon, agent_idx] = 1.0
-        else:
-            attention_masks[: self.history_horizon] = 1.0
-
-        conditions = self.get_conditions(observations, agent_idx)
         if self.use_action:
             trajectories = np.concatenate([actions, observations], axis=-1)
         else:
             trajectories = observations
 
+        if self.use_inv_dyn:
+            cond_masks = self.mask_generator(observations.shape, agent_mask)
+            cond_trajectories = observations.copy()
+        else:
+            cond_masks = self.mask_generator(trajectories.shape, agent_mask)
+            cond_trajectories = trajectories.copy()
+        cond_trajectories[: self.history_horizon, ~agent_mask] = 0.0
+        cond = {
+            "x": cond_trajectories,
+            "masks": cond_masks,
+        }
+
+        loss_masks = np.zeros((observations.shape[0], observations.shape[1], 1))
+        if self.pred_future_padding:
+            loss_masks[self.history_horizon :] = 1.0
+        else:
+            loss_masks[self.history_horizon : mask_end - history_start] = 1.0
+        if self.use_inv_dyn:
+            loss_masks[self.history_horizon, agent_mask] = 0.0
+
+        attention_masks = np.zeros((observations.shape[0], observations.shape[1], 1))
+        attention_masks[self.history_horizon : mask_end - history_start] = 1.0
+        attention_masks[: self.history_horizon, agent_mask] = 1.0
+
         batch = {
             "x": trajectories,
-            "cond": conditions,
+            "cond": cond,
             "loss_masks": loss_masks,
             "attention_masks": attention_masks,
         }
@@ -322,7 +378,7 @@ class ValueDataset(SequenceDataset):
 
     def __init__(self, *args, discount=0.99, **kwargs):
         super().__init__(*args, **kwargs)
-        assert self.include_returns == True
+        assert self.include_returns is True
 
     def __getitem__(self, idx):
         batch = super().__getitem__(idx)
@@ -337,14 +393,14 @@ class ValueDataset(SequenceDataset):
 class BCSequenceDataset(SequenceDataset):
     def __init__(
         self,
-        env_type="d4rl",
-        env="hopper-medium-replay",
-        n_agents=2,
-        normalizer="LimitsNormalizer",
-        preprocess_fns=[],
-        max_path_length=1000,
-        max_n_episodes=10000,
-        agent_share_parameters=False,
+        env_type: str = "d4rl",
+        env: str = "hopper-medium-replay",
+        n_agents: int = 2,
+        normalizer: str = "LimitsNormalizer",
+        preprocess_fns: List[Callable] = [],
+        max_path_length: int = 1000,
+        max_n_episodes: int = 10000,
+        agent_share_parameters: bool = False,
     ):
         super().__init__(
             env_type=env_type,
@@ -356,6 +412,7 @@ class BCSequenceDataset(SequenceDataset):
             max_n_episodes=max_n_episodes,
             agent_share_parameters=agent_share_parameters,
             horizon=1,
+            history_horizon=0,
             use_action=True,
             termination_penalty=0.0,
             use_padding=False,
@@ -363,7 +420,7 @@ class BCSequenceDataset(SequenceDataset):
             include_returns=False,
         )
 
-    def __getitem__(self, idx, eps=1e-4):
+    def __getitem__(self, idx: int):
         path_ind, start, end, _ = self.indices[idx]
 
         observations = self.fields.normed_observations[path_ind, start:end]
