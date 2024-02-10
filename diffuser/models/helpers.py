@@ -82,7 +82,6 @@ class SelfAttention(nn.Module):
         v_n_channels: int,
         nheads: int = 4,
         residual: bool = False,
-        use_state: bool = False,
     ):
         super().__init__()
         self.nheads = nheads
@@ -91,11 +90,6 @@ class SelfAttention(nn.Module):
         self.value_layer = nn.Conv1d(n_channels, v_n_channels * nheads, kernel_size=1)
         self.attend = nn.Softmax(dim=-1)
         self.residual = residual
-        self.use_state = use_state
-        if use_state:
-            self.state_query_layer = nn.Conv1d(n_channels, qk_n_channels, kernel_size=1)
-            self.state_key_layer = nn.Conv1d(n_channels, qk_n_channels, kernel_size=1)
-            self.state_value_layer = nn.Conv1d(n_channels, n_channels, kernel_size=1)
         if residual:
             self.gamma = nn.Parameter(torch.zeros([1]))
 
@@ -116,24 +110,6 @@ class SelfAttention(nn.Module):
         value = rearrange(
             value, "(b a) (h d) t -> h b a (d t)", h=self.nheads, a=x.shape[1]
         )
-
-        if self.use_state:
-            assert states is not None  # b f t
-            state_query, state_key, state_value = (
-                self.state_query_layer(states),
-                self.state_key_layer(states),
-                self.state_value_layer(states),
-            )
-            state_query = rearrange(
-                state_query, "b (h d) t -> h b 1 (d t)", h=self.nheads
-            )
-            state_key = rearrange(state_key, "b (h d) t -> h b 1 (d t)", h=self.nheads)
-            state_value = rearrange(
-                state_value, "b (h d) t -> h b 1 (d t)", h=self.nheads
-            )
-            query = torch.cat((query, state_query), dim=2)
-            key = torch.cat((key, state_key), dim=2)
-            value = torch.cat((value, state_value), dim=2)
 
         dots = einsum(query, key, "h b a1 f, h b a2 f -> h b a1 a2") / math.sqrt(
             query.shape[-1]

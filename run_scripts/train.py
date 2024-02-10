@@ -17,7 +17,6 @@ def main(Config, RUN):
     dataset_extra_kwargs = dict()
 
     # configs that does not exist in old yaml files
-    Config.use_state = getattr(Config, "use_state", False)
     Config.discrete_action = getattr(Config, "discrete_action", False)
     Config.state_loss_weight = getattr(Config, "state_loss_weight", None)
     Config.opponent_loss_weight = getattr(Config, "opponent_loss_weight", None)
@@ -54,7 +53,6 @@ def main(Config, RUN):
         use_action=Config.use_action,
         discrete_action=Config.discrete_action,
         max_path_length=Config.max_path_length,
-        use_state=Config.use_state,
         include_returns=Config.returns_condition,
         include_env_ts=Config.env_ts_condition,
         returns_scale=Config.returns_scale,
@@ -73,9 +71,6 @@ def main(Config, RUN):
         **dataset_extra_kwargs,
     )
 
-    if Config.use_state:
-        print("\n\n USE STATE !!! \n\n")
-
     render_config = utils.Config(
         Config.renderer,
         savepath="render_config.pkl",
@@ -92,7 +87,6 @@ def main(Config, RUN):
     data_encoder = data_encoder_config()
     observation_dim = dataset.observation_dim
     action_dim = dataset.action_dim
-    state_dim = dataset.state_dim
 
     # -----------------------------------------------------------------------------#
     # ------------------------------ model & trainer ------------------------------#
@@ -104,11 +98,9 @@ def main(Config, RUN):
         horizon=Config.horizon + Config.history_horizon,
         history_horizon=Config.history_horizon,
         transition_dim=observation_dim,
-        state_dim=state_dim,
         dim_mults=Config.dim_mults,
         returns_condition=Config.returns_condition,
         env_ts_condition=Config.env_ts_condition,
-        use_state=Config.use_state,
         dim=Config.dim,
         condition_dropout=Config.condition_dropout,
         residual_attn=Config.residual_attn,
@@ -125,8 +117,6 @@ def main(Config, RUN):
         history_horizon=Config.history_horizon,
         observation_dim=observation_dim,
         action_dim=action_dim,
-        state_dim=state_dim,
-        use_state=Config.use_state,
         discrete_action=Config.discrete_action,
         num_actions=getattr(dataset.env, "num_actions", 0),
         n_timesteps=Config.n_diffusion_steps,

@@ -15,8 +15,6 @@ class ConcatenatedTemporalUnet(nn.Module):
         n_agents: int,
         horizon: int,
         transition_dim: int,
-        state_dim: int,
-        use_state: bool = False,
         dim: int = 128,
         history_horizon: int = 0,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
@@ -30,8 +28,6 @@ class ConcatenatedTemporalUnet(nn.Module):
         use_temporal_attention: bool = False,  # not used here
     ):
         super().__init__()
-
-        assert not use_state
 
         self.n_agents = n_agents
         self.history_horizon = history_horizon
@@ -92,8 +88,6 @@ class IndependentTemporalUnet(nn.Module):
         n_agents: int,
         horizon: int,
         transition_dim: int,
-        state_dim: int,
-        use_state: bool = False,
         dim: int = 128,
         history_horizon: int = 0,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
@@ -108,7 +102,6 @@ class IndependentTemporalUnet(nn.Module):
         super().__init__()
 
         self.n_agents = n_agents
-        self.use_state = use_state
         self.history_horizon = history_horizon
         self.use_temporal_attention = use_temporal_attention
 
@@ -176,8 +169,6 @@ class SharedIndependentTemporalUnet(nn.Module):
         horizon: int,
         history_horizon: int,  # not used
         transition_dim: int,
-        state_dim: int,
-        use_state: bool = False,
         dim: int = 128,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
         returns_condition: bool = False,
@@ -190,7 +181,6 @@ class SharedIndependentTemporalUnet(nn.Module):
         super().__init__()
 
         self.n_agents = n_agents
-        self.use_state = use_state
 
         self.returns_condition = returns_condition
         self.env_ts_condition = env_ts_condition

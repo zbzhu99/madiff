@@ -29,7 +29,6 @@ class SequenceDataset(torch.utils.data.Dataset):
         returns_scale: float = 400.0,
         include_returns: bool = False,
         include_env_ts: bool = False,
-        use_state: bool = False,
         history_horizon: int = 0,
         agent_share_parameters: bool = False,
         use_seed_dataset: bool = False,
@@ -75,7 +74,6 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.discrete_action = discrete_action
         self.include_returns = include_returns
         self.include_env_ts = include_env_ts
-        self.use_state = use_state
         self.decentralized_execution = decentralized_execution
         self.use_zero_padding = use_zero_padding
         self.pred_future_padding = pred_future_padding
@@ -86,7 +84,7 @@ class SequenceDataset(torch.utils.data.Dataset):
             else:
                 itr = env_mod.sequence_dataset(env, self.preprocess_fn)
         elif env_type == "smac" or env_type == "smacv2":
-            itr = env_mod.sequence_dataset(env, self.preprocess_fn, use_state=use_state)
+            itr = env_mod.sequence_dataset(env, self.preprocess_fn)
         else:
             itr = env_mod.sequence_dataset(env, self.preprocess_fn)
 
@@ -110,7 +108,6 @@ class SequenceDataset(torch.utils.data.Dataset):
             global_feats=self.global_feats,
         )
 
-        self.state_dim = fields.states.shape[-1] if self.use_state else 0
         self.observation_dim = fields.observations.shape[-1]
         self.action_dim = fields.actions.shape[-1] if self.use_action else 0
         self.fields = fields
@@ -127,9 +124,7 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         if self.discrete_action:
             # smac has discrete actions, so we only need to normalize observations
-            self.normalize(
-                keys=["states", "observations"] if self.use_state else ["observations"]
-            )
+            self.normalize(["observations"])
         else:
             self.normalize()
 
@@ -149,9 +144,6 @@ class SequenceDataset(torch.utils.data.Dataset):
                     keys.append("actions")
                 else:
                     keys.append("normed_actions")
-
-            if self.use_state:
-                keys.append("normed_states")
 
         for key in keys:
             shape = self.fields[key].shape
@@ -190,9 +182,6 @@ class SequenceDataset(torch.utils.data.Dataset):
                 else:
                     keys.append("normed_actions")
 
-            if self.use_state:
-                keys.append("normed_states")
-
         for key in keys:
             shape = self.fields[key].shape
             if self.use_zero_padding:
@@ -225,8 +214,6 @@ class SequenceDataset(torch.utils.data.Dataset):
         """
         if keys is None:
             keys = ["observations", "actions"] if self.use_action else ["observations"]
-            if self.use_state:
-                keys.append("states")
 
         for key in keys:
             shape = self.fields[key].shape
@@ -306,8 +293,6 @@ class SequenceDataset(torch.utils.data.Dataset):
                 actions = self.fields.actions[path_ind, history_start:end]
             else:
                 actions = self.fields.normed_actions[path_ind, history_start:end]
-        if self.use_state:
-            states = self.fields.normed_states[path_ind, history_start:end]
 
         if self.use_action:
             trajectories = np.concatenate([actions, observations], axis=-1)
@@ -359,9 +344,6 @@ class SequenceDataset(torch.utils.data.Dataset):
             env_ts[np.where(env_ts < 0)] = self.max_path_length
             env_ts[np.where(env_ts >= self.max_path_length)] = self.max_path_length
             batch["env_ts"] = env_ts
-
-        if self.use_state:
-            batch["states"] = states
 
         if "legal_actions" in self.fields.keys:
             batch["legal_actions"] = self.fields.legal_actions[

@@ -23,12 +23,10 @@ class ConvAttentionDeconv(nn.Module):
         self,
         horizon: int,
         transition_dim: int,
-        state_dim: int,
         dim: int = 128,
         history_horizon: int = 0,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
         n_agents: int = 2,
-        use_state: bool = False,
         returns_condition: bool = False,
         env_ts_condition: bool = False,
         condition_dropout: float = 0.1,
@@ -41,7 +39,6 @@ class ConvAttentionDeconv(nn.Module):
         super().__init__()
 
         self.n_agents = n_agents
-        self.use_state = use_state
         self.history_horizon = history_horizon
         self.use_temporal_attention = use_temporal_attention
 
@@ -68,20 +65,6 @@ class ConvAttentionDeconv(nn.Module):
                 for _ in range(n_agents)
             ]
         )
-
-        if self.use_state:
-            self.state_net = TemporalUnet(
-                horizon=horizon,
-                history_horizon=history_horizon,
-                transition_dim=state_dim,
-                dim=dim,
-                dim_mults=dim_mults,
-                returns_condition=returns_condition,
-                env_ts_condition=env_ts_condition,
-                condition_dropout=condition_dropout,
-                max_path_length=max_path_length,
-                kernel_size=kernel_size,
-            )
 
         if self.use_temporal_attention:
             print("\n USE TEMPORAL ATTENTION !!! \n")
@@ -112,7 +95,6 @@ class ConvAttentionDeconv(nn.Module):
                     in_out[-1][1],
                     in_out[-1][1] // 16,
                     in_out[-1][1] // 4,
-                    use_state=use_state,
                     residual=residual_attn,
                 )
             ]
@@ -122,7 +104,6 @@ class ConvAttentionDeconv(nn.Module):
                         dims[1],
                         dims[1] // 16,
                         dims[1] // 4,
-                        use_state=use_state,
                         residual=residual_attn,
                     )
                 )
@@ -154,168 +135,6 @@ class ConvAttentionDeconv(nn.Module):
         time,
         returns=None,
         states=None,
-        env_timestep=None,
-        attention_masks=None,
-        use_dropout: bool = True,
-        force_dropout: bool = False,
-        **kwargs,
-    ):
-        if not self.use_state:
-            return self.forward_without_states(
-                x,
-                time,
-                returns,
-                env_timestep,
-                attention_masks,
-                use_dropout,
-                force_dropout,
-                **kwargs,
-            )
-        else:
-            return self.forward_with_states(
-                x,
-                states,
-                time,
-                returns,
-                env_timestep,
-                attention_masks,
-                use_dropout,
-                force_dropout,
-                **kwargs,
-            )
-
-    def forward_with_states(
-        self,
-        x,
-        states,
-        time,
-        returns=None,
-        env_timestep=None,
-        attention_masks=None,
-        use_dropout: bool = True,
-        force_dropout: bool = False,
-        **kwargs,
-    ):
-        """
-        x : [ batch x horizon x agent x transition ]
-        returns : [ batch x horizon x agent ]
-        """
-
-        assert (
-            x.shape[2] == self.n_agents
-        ), f"Expected {self.n_agents} agents, but got samples with shape {x.shape}"
-        assert (
-            self.use_state and states is not None
-        ), f"{type(states)}, {self.use_state}"
-
-        x = einops.rearrange(x, "b t a f -> b a f t")
-        states = einops.rearrange(states, "b t f -> b f t")
-        x = [x[:, a_idx] for a_idx in range(x.shape[1])]  # a, b f t
-
-        t = [self.nets[i].time_mlp(time) for i in range(self.n_agents)]
-        state_t = self.state_net.time_mlp(time)
-        if self.returns_condition:
-            assert returns is not None
-            returns_embed = [
-                self.nets[i].returns_mlp(returns[:, :, i]) for i in range(self.n_agents)
-            ]
-            state_returns_embed = self.state_net.returns_mlp(returns[:, :, 0])
-            if use_dropout:
-                # here use the same mask for all agents
-                mask = (
-                    self.nets[0]
-                    .mask_dist.sample(sample_shape=(returns_embed[0].size(0), 1))
-                    .to(returns_embed[0].device)
-                )
-                returns_embed = [
-                    returns_embed[i] * mask for i in range(len(returns_embed))
-                ]
-                state_returns_embed = mask * state_returns_embed
-            if force_dropout:
-                returns_embed = [
-                    returns_embed[i] * 0 for i in range(len(returns_embed))
-                ]
-                state_returns_embed = 0 * state_returns_embed
-
-            t = [torch.cat([t[i], returns_embed[i]], dim=-1) for i in range(len(t))]
-            state_t = torch.cat([state_t, state_returns_embed], dim=-1)
-
-        if self.env_ts_condition:
-            assert env_timestep is not None
-            env_ts_embed = [
-                self.nets[i].env_ts_mlp(env_timestep) for i in range(self.n_agents)
-            ]
-            state_env_ts_embed = self.state_net.returns_mlp(env_timestep)
-            t = [torch.cat([t[i], env_ts_embed[i]], dim=-1) for i in range(len(t))]
-            state_t = torch.cat([state_t, state_env_ts_embed], dim=-1)
-
-        """ Encoder Forward """
-        h = [[] for _ in range(self.n_agents)]
-        for layer_idx in range(len(self.nets[0].downs)):
-            for i in range(self.n_agents):
-                resnet, resnet2, downsample = self.nets[i].downs[layer_idx]
-                x[i] = resnet(x[i], t[i])
-                x[i] = resnet2(x[i], t[i])
-                h[i].append(x[i])
-                x[i] = downsample(x[i])
-        for i in range(self.n_agents):
-            x[i] = self.nets[i].mid_block1(x[i], t[i])
-            x[i] = self.nets[i].mid_block2(x[i], t[i])
-
-        """ State Encoder Forward """
-        state_h = []
-        for resnet, resnet2, downsample in self.state_net.downs:
-            states = resnet(states, state_t)
-            states = resnet2(states, state_t)
-            state_h.append(states)
-            states = downsample(states)
-        states = self.state_net.mid_block1(states, state_t)
-        states = self.state_net.mid_block2(states, state_t)
-
-        """ Attention """
-        x = torch.stack(x, dim=1)  # b a f t
-        x = self.self_attn[0](x, states=states)  # b a f t
-        x, states = x[:, :-1], x[:, -1]
-        x = [x[:, a_idx] for a_idx in range(x.shape[1])]  # a, b f t
-
-        """ Mixed Decoder Forward """
-        for layer_idx in range(len(self.nets[0].ups)):
-            """Skip-connection with Attention"""
-            hiddens = torch.stack([hid.pop() for hid in h], dim=1)  # b a f t
-            state_hiddens = state_h.pop()
-            hiddens = self.self_attn[layer_idx + 1](hiddens, states=state_hiddens)
-            hiddens, state_hiddens = hiddens[:, :-1], hiddens[:, -1]
-
-            """ Decoder Forward """
-            for i in range(self.n_agents):
-                resnet, resnet2, upsample = self.nets[i].ups[layer_idx]
-                x[i] = torch.cat((x[i], hiddens[:, i]), dim=1)
-                x[i] = resnet(x[i], t[i])
-                x[i] = resnet2(x[i], t[i])
-                x[i] = upsample(x[i])
-
-            """ State Decoder Forward """
-            state_resnet, state_resnet2, state_upsample = self.state_net.ups[layer_idx]
-            states = torch.cat((states, state_hiddens), dim=1)
-            states = state_resnet(states, state_t)
-            states = state_resnet2(states, state_t)
-            states = state_upsample(states)
-
-        for i in range(self.n_agents):
-            x[i] = self.nets[i].final_conv(x[i])
-        states = self.state_net.final_conv(states)
-
-        x = torch.stack(x, dim=1)
-        x = einops.rearrange(x, "b a f t -> b t a f")
-        states = einops.rearrange(states, "b f t -> b t f")
-
-        return x, states
-
-    def forward_without_states(
-        self,
-        x,
-        time,
-        returns=None,
         env_timestep=None,
         attention_masks=None,
         use_dropout: bool = True,
@@ -414,13 +233,11 @@ class SharedConvAttentionDeconv(nn.Module):
         self,
         horizon: int,
         transition_dim: int,
-        state_dim: int,
         dim: int = 128,
         history_horizon: int = 0,
         dim_mults: Tuple[int] = (1, 2, 4, 8),
         nhead: int = 4,
         n_agents: int = 2,
-        use_state: bool = False,
         returns_condition: bool = False,
         env_ts_condition: bool = False,
         condition_dropout: float = 0.1,
@@ -433,7 +250,6 @@ class SharedConvAttentionDeconv(nn.Module):
         super().__init__()
 
         self.n_agents = n_agents
-        self.use_state = use_state
         self.history_horizon = history_horizon
         self.use_temporal_attention = use_temporal_attention
 
@@ -457,63 +273,25 @@ class SharedConvAttentionDeconv(nn.Module):
             kernel_size=kernel_size,
         )
 
-        if self.use_state:
-            self.state_net = TemporalUnet(
-                horizon=horizon,
-                history_horizon=history_horizon,
-                transition_dim=state_dim,
-                dim=dim,
-                dim_mults=dim_mults,
-                returns_condition=returns_condition,
-                env_ts_condition=env_ts_condition,
-                condition_dropout=condition_dropout,
-                max_path_length=max_path_length,
-                kernel_size=kernel_size,
+        self.self_attn = [
+            TemporalSelfAttention(
+                in_out[-1][1],
+                in_out[-1][1] // 16,
+                in_out[-1][1] // 4,
+                residual=residual_attn,
+                embed_dim=self.net.embed_dim,
             )
-
-        if self.use_temporal_attention:
-            print("\n USE TEMPORAL ATTENTION !!! \n")
-            AttentionModule = TemporalSelfAttention
-
-            self.self_attn = [
-                AttentionModule(
-                    in_out[-1][1],
-                    in_out[-1][1] // 16,
-                    in_out[-1][1] // 4,
+        ]
+        for dims in reversed(in_out):
+            self.self_attn.append(
+                TemporalSelfAttention(
+                    dims[1],
+                    dims[1] // 16,
+                    dims[1] // 4,
                     residual=residual_attn,
                     embed_dim=self.net.embed_dim,
                 )
-            ]
-            for dims in reversed(in_out):
-                self.self_attn.append(
-                    AttentionModule(
-                        dims[1],
-                        dims[1] // 16,
-                        dims[1] // 4,
-                        residual=residual_attn,
-                        embed_dim=self.net.embed_dim,
-                    )
-                )
-        else:
-            self.self_attn = [
-                SelfAttention(
-                    in_out[-1][1],
-                    in_out[-1][1] // 16,
-                    in_out[-1][1] // 4,
-                    use_state=use_state,
-                    residual=residual_attn,
-                )
-            ]
-            for dims in reversed(in_out):
-                self.self_attn.append(
-                    SelfAttention(
-                        dims[1],
-                        dims[1] // 16,
-                        dims[1] // 4,
-                        use_state=use_state,
-                        residual=residual_attn,
-                    )
-                )
+            )
         self.self_attn = nn.ModuleList(self.self_attn)
 
         self.use_layer_norm = use_layer_norm
@@ -542,161 +320,6 @@ class SharedConvAttentionDeconv(nn.Module):
         time,
         returns=None,
         states=None,
-        env_timestep=None,
-        attention_masks=None,
-        use_dropout: bool = True,
-        force_dropout: bool = False,
-        **kwargs,
-    ):
-        if not self.use_state:
-            return self.forward_without_states(
-                x,
-                time,
-                returns,
-                env_timestep,
-                attention_masks,
-                use_dropout,
-                force_dropout,
-                **kwargs,
-            )
-        else:
-            return self.forward_with_states(
-                x,
-                states,
-                time,
-                returns,
-                env_timestep,
-                attention_masks,
-                use_dropout,
-                force_dropout,
-                **kwargs,
-            )
-
-    def forward_with_states(
-        self,
-        x,
-        states,
-        time,
-        returns=None,
-        env_timestep=None,
-        attention_masks=None,
-        use_dropout: bool = True,
-        force_dropout: bool = False,
-        **kwargs,
-    ):
-        """
-        x : [ batch x horizon x agent x transition ]
-        states: [ batch x horizon x state_dim ]
-        returns : [ batch x horizon x agent ]
-        """
-
-        assert (
-            x.shape[2] == self.n_agents
-        ), f"Expected {self.n_agents} agents, but got samples with shape {x.shape}"
-        assert (
-            self.use_state and states is not None
-        ), f"{type(states)}, {self.use_state}"
-
-        x = einops.rearrange(x, "b t a f -> b a f t")
-        states = einops.rearrange(states, "b t f -> b f t")
-        bs = x.shape[0]
-
-        t = self.net.time_mlp(torch.stack([time for _ in range(x.shape[1])], dim=1))
-        state_t = self.state_net.time_mlp(time)
-        if self.returns_condition:
-            assert returns is not None
-            returns = einops.rearrange(returns, "b t a -> b a t")
-            returns_embed = self.net.returns_mlp(returns)
-            state_returns_embed = self.state_net.returns_mlp(returns[:, 0])
-            if use_dropout:
-                # here use the same mask for all agents
-                mask = self.net.mask_dist.sample(
-                    sample_shape=(returns_embed.size(0), returns_embed.size(1), 1)
-                ).to(returns_embed.device)
-                returns_embed = mask * returns_embed
-                state_returns_embed = mask[:, 0] * state_returns_embed
-            if force_dropout:
-                returns_embed = 0 * returns_embed
-                state_returns_embed = 0 * state_returns_embed
-            t = torch.cat([t, returns_embed], dim=-1)
-            state_t = torch.cat([state_t, state_returns_embed], dim=-1)
-
-        if self.env_ts_condition:
-            assert env_timestep is not None
-            # env_timestep = einops.repeat()
-
-        """ Encoder Forward """
-        h = []
-        x = x.reshape(x.shape[0] * x.shape[1], x.shape[2], x.shape[3])
-        t = t.reshape(t.shape[0] * t.shape[1], t.shape[2])
-        for resnet, resnet2, downsample in self.net.downs:
-            x = resnet(x, t)
-            x = resnet2(x, t)
-            h.append(x)
-            x = downsample(x)
-        x = self.net.mid_block1(x, t)
-        x = self.net.mid_block2(x, t)
-
-        """ State Encoder Forward """
-        state_h = []
-        for resnet, resnet2, downsample in self.state_net.downs:
-            states = resnet(states, state_t)
-            states = resnet2(states, state_t)
-            state_h.append(states)
-            states = downsample(states)
-        states = self.state_net.mid_block1(states, state_t)
-        states = self.state_net.mid_block2(states, state_t)
-
-        """ Attention """
-        x = x.reshape(bs, x.shape[0] // bs, x.shape[1], x.shape[2])
-        x = torch.cat((x, states.unsqueeze(1)), dim=1)
-        x = self.self_attn[0](x)  # b a f t
-        x, states = x[:, :-1], x[:, -1]
-
-        """ Mixed Decoder Forward """
-        x = x.reshape(x.shape[0] * x.shape[1], x.shape[2], x.shape[3])
-        for layer_idx in range(len(self.net.ups)):
-            """Skip-connection with Attention"""
-            hiddens = h.pop()
-            hiddens = hiddens.reshape(
-                bs, hiddens.shape[0] // bs, hiddens.shape[1], hiddens.shape[2]
-            )  # b a f t
-            state_hiddens = state_h.pop()
-            hiddens = torch.cat((hiddens, state_hiddens.unsqueeze(1)), dim=1)
-            hiddens = self.self_attn[layer_idx + 1](hiddens)
-            hiddens, state_hiddens = hiddens[:, :-1], hiddens[:, -1]
-            hiddens = hiddens.reshape(
-                hiddens.shape[0] * hiddens.shape[1], hiddens.shape[2], hiddens.shape[3]
-            )
-
-            """ Decoder Forward """
-            resnet, resnet2, upsample = self.net.ups[layer_idx]
-            x = torch.cat((x, hiddens), dim=1)
-            x = resnet(x, t)
-            x = resnet2(x, t)
-            x = upsample(x)
-
-            """ State Decoder Forward """
-            state_resnet, state_resnet2, state_upsample = self.state_net.ups[layer_idx]
-            states = torch.cat((states, state_hiddens), dim=1)
-            states = state_resnet(states, state_t)
-            states = state_resnet2(states, state_t)
-            states = state_upsample(states)
-
-        x = self.net.final_conv(x)
-        x = x.reshape(bs, x.shape[0] // bs, x.shape[1], x.shape[2])
-        states = self.state_net.final_conv(states)
-
-        x = einops.rearrange(x, "b a f t -> b t a f")
-        states = einops.rearrange(states, "b f t -> b t f")
-
-        return x, states
-
-    def forward_without_states(
-        self,
-        x,
-        time,
-        returns=None,
         env_timestep=None,
         attention_masks=None,
         use_dropout: bool = True,

@@ -19,9 +19,7 @@ class GaussianDiffusion(nn.Module):
         history_horizon: int,
         observation_dim: int,
         action_dim: int,
-        state_dim: int,
         use_inv_dyn: bool = True,
-        use_state: bool = False,
         discrete_action: bool = False,
         num_actions: int = 0,  # for discrete action space
         n_timesteps: int = 1000,
@@ -55,10 +53,8 @@ class GaussianDiffusion(nn.Module):
         self.history_horizon = history_horizon
         self.observation_dim = observation_dim
         self.action_dim = action_dim
-        self.state_dim = state_dim
         self.state_loss_weight = state_loss_weight
         self.opponent_loss_weight = opponent_loss_weight
-        self.use_state = use_state
         self.discrete_action = discrete_action
         self.num_actions = num_actions
         self.transition_dim = observation_dim + action_dim
@@ -100,9 +96,6 @@ class GaussianDiffusion(nn.Module):
         loss_weights = self.get_loss_weights(loss_discount, action_weight)
         loss_type = "state_l2" if self.use_inv_dyn else "l2"
         self.loss_fn = Losses[loss_type](loss_weights)
-        if self.use_state:
-            state_loss_weights = self.get_state_loss_weights(loss_discount)
-            self.state_loss_fn = Losses["state_l2"](state_loss_weights)
 
     def _build_inv_model(self, hidden_dim: int, output_dim: int):
         if self.joint_inv:
@@ -153,18 +146,6 @@ class GaussianDiffusion(nn.Module):
         self.ddim_noise_scheduler.set_timesteps(n_ddim_steps)
         self.use_ddim_sample = True
 
-    def get_state_loss_weights(self, discount: float):
-        dim_weights = torch.ones(self.state_dim, dtype=torch.float32)
-
-        # decay loss with trajectory timestep: discount**t
-        discounts = discount ** torch.arange(self.horizon, dtype=torch.float)
-        discounts = discounts / discounts.mean()
-        discounts = torch.cat([torch.zeros(self.history_horizon), discounts])
-        loss_weights = torch.einsum("h,t->ht", discounts, dim_weights)
-        loss_weights = loss_weights.clone()
-
-        return loss_weights
-
     def get_loss_weights(self, discount: float, action_weight: Optional[float] = None):
         """
         sets loss coefficients for trajectory
@@ -201,75 +182,34 @@ class GaussianDiffusion(nn.Module):
         attention_masks: Optional[torch.Tensor] = None,
         states: Optional[torch.Tensor] = None,
     ):
-        if self.use_state:
-            assert states is not None
-            if self.returns_condition:
-                # epsilon could be epsilon or x0 itself
-                epsilon_cond, state_epsilon_cond = self.model(
-                    x,
-                    t,
-                    returns=returns,
-                    env_timestep=env_ts,
-                    attention_masks=attention_masks,
-                    states=states,
-                    use_dropout=False,
-                )
-                epsilon_uncond, state_epsilon_uncond = self.model(
-                    x,
-                    t,
-                    returns=returns,
-                    env_timestep=env_ts,
-                    attention_masks=attention_masks,
-                    states=states,
-                    force_dropout=True,
-                )
-                epsilon = epsilon_uncond + self.condition_guidance_w * (
-                    epsilon_cond - epsilon_uncond
-                )
-                state_epsilon = state_epsilon_uncond + self.condition_guidance_w * (
-                    state_epsilon_cond - state_epsilon_uncond
-                )
-            else:
-                epsilon, state_epsilon = self.model(
-                    x,
-                    t,
-                    env_timestep=env_ts,
-                    attention_masks=attention_masks,
-                    states=states,
-                )
+        if self.returns_condition:
+            # epsilon could be epsilon or x0 itself
+            epsilon_cond = self.model(
+                x,
+                t,
+                returns=returns,
+                env_timestep=env_ts,
+                attention_masks=attention_masks,
+                use_dropout=False,
+            )
+            epsilon_uncond = self.model(
+                x,
+                t,
+                returns=returns,
+                env_timestep=env_ts,
+                attention_masks=attention_masks,
+                force_dropout=True,
+            )
+            epsilon = epsilon_uncond + self.condition_guidance_w * (
+                epsilon_cond - epsilon_uncond
+            )
 
         else:
-            if self.returns_condition:
-                # epsilon could be epsilon or x0 itself
-                epsilon_cond = self.model(
-                    x,
-                    t,
-                    returns=returns,
-                    env_timestep=env_ts,
-                    attention_masks=attention_masks,
-                    use_dropout=False,
-                )
-                epsilon_uncond = self.model(
-                    x,
-                    t,
-                    returns=returns,
-                    env_timestep=env_ts,
-                    attention_masks=attention_masks,
-                    force_dropout=True,
-                )
-                epsilon = epsilon_uncond + self.condition_guidance_w * (
-                    epsilon_cond - epsilon_uncond
-                )
+            epsilon = self.model(
+                x, t, env_timestep=env_ts, attention_masks=attention_masks
+            )
 
-            else:
-                epsilon = self.model(
-                    x, t, env_timestep=env_ts, attention_masks=attention_masks
-                )
-
-        if self.use_state:
-            return epsilon, state_epsilon
-        else:
-            return epsilon
+        return epsilon
 
     @torch.no_grad()
     def conditional_sample(
@@ -297,9 +237,6 @@ class GaussianDiffusion(nn.Module):
             scheduler = self.noise_scheduler
 
         x = 0.5 * torch.randn(shape, device=device)  # 0.5 for low tempurature sampling
-        if self.use_state:
-            state_shape = (batch_size, shape[1], self.state_dim)
-            states = 0.5 * torch.randn(state_shape, device=device)
 
         if return_diffusion:
             diffusion = [x]
@@ -316,19 +253,12 @@ class GaussianDiffusion(nn.Module):
 
             # 2. predict model output
             ts = torch.full((batch_size,), t, device=device, dtype=torch.long)
-            if self.use_state:
-                model_output, state_model_output = self.get_model_output(
-                    x, ts, returns, env_ts, attention_masks, states
-                )
-            else:
-                model_output = self.get_model_output(
-                    x, ts, returns, env_ts, attention_masks
-                )
+            model_output = self.get_model_output(
+                x, ts, returns, env_ts, attention_masks
+            )
 
             # 3. compute previous image: x_t -> x_t-1
             x = scheduler.step(model_output, t, x).prev_sample
-            if self.use_state:
-                states = scheduler.step(state_model_output, t, states)
 
             progress.update({"t": t})
             if return_diffusion:
@@ -363,33 +293,19 @@ class GaussianDiffusion(nn.Module):
         x_noisy = apply_conditioning(x_noisy, cond)
         x_noisy = self.data_encoder(x_noisy)
 
-        if self.use_state:
-            state_noise = torch.randn_like(states)
-            state_noisy = self.noise_scheduler.add_noise(states, state_noise, t)
-            epsilon, state_epsilon = self.model(
-                x_noisy,
-                t,
-                returns=returns,
-                env_timestep=env_ts,
-                states=state_noisy,
-                attention_masks=attention_masks,
-            )
-        else:
-            epsilon = self.model(
-                x_noisy,
-                t,
-                returns=returns,
-                env_timestep=env_ts,
-                attention_masks=attention_masks,
-            )
+        epsilon = self.model(
+            x_noisy,
+            t,
+            returns=returns,
+            env_timestep=env_ts,
+            attention_masks=attention_masks,
+        )
 
         if not self.predict_epsilon:
             epsilon = apply_conditioning(epsilon, cond)
             epsilon = self.data_encoder(epsilon)
 
         assert noise.shape == epsilon.shape
-        if self.use_state:
-            assert state_noise.shape == state_epsilon.shape
 
         if self.predict_epsilon:
             loss, info = self.loss_fn(epsilon, noise)
@@ -412,19 +328,6 @@ class GaussianDiffusion(nn.Module):
         loss = (
             (loss * loss_masks).mean(dim=[1, 2]) / loss_masks.mean(dim=[1, 2])
         ).mean()
-
-        if self.use_state:
-            if self.predict_epsilon:
-                state_loss, _ = self.state_loss_fn(state_epsilon, state_noise)
-            else:
-                state_loss, _ = self.state_loss_fn(state_epsilon, states)
-            state_loss = (state_loss * loss_masks[:, :, 0]).mean()
-            info["state_loss"] = state_loss
-            if self.state_loss_weight is not None:
-                state_loss = state_loss * self.state_loss_weight
-            # normalize state_loss by `n_agents`, otherwise it will be more important
-            # as `n_agents` grows
-            loss = loss + state_loss / self.n_agents
 
         if self.returns_loss_guided:
             returns_loss = self.r_losses(x_noisy, t, epsilon, cond)

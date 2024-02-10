@@ -130,7 +130,7 @@ def load_environment(name, **kwargs):
     return env
 
 
-def sequence_dataset(env, preprocess_fn, use_state: bool = False):
+def sequence_dataset(env, preprocess_fn):
     dataset_path = os.path.join(
         os.path.dirname(__file__),
         "data/smac",
@@ -140,8 +140,6 @@ def sequence_dataset(env, preprocess_fn, use_state: bool = False):
     if not os.path.exists(dataset_path):
         raise FileNotFoundError("Dataset directory not found: {}".format(dataset_path))
 
-    if use_state:
-        states = np.load(os.path.join(dataset_path, "states.npy"))
     observations = np.load(os.path.join(dataset_path, "obs.npy"))
     legal_actions = np.load(os.path.join(dataset_path, "legals.npy"))
     rewards = np.load(os.path.join(dataset_path, "rewards.npy"))
@@ -152,8 +150,6 @@ def sequence_dataset(env, preprocess_fn, use_state: bool = False):
     for path_length in path_lengths:
         end = start + path_length
         episode_data = {}
-        if use_state:
-            episode_data["states"] = states[start:end]
         episode_data["observations"] = observations[start:end]
         episode_data["legal_actions"] = legal_actions[start:end]
         episode_data["rewards"] = rewards[start:end]

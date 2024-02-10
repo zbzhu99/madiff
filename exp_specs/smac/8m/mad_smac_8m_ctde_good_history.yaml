@@ -7,8 +7,8 @@ meta_data:
 variables:
   seed: [100, 200, 300]
 
-  horizon: [20]
-  history_horizon: [8]
+  horizon: [4]
+  history_horizon: [20]
   returns_scale: [20]
   dataset: ["8m-Good"]
   condition_guidance_w: [1.2]
@@ -35,6 +35,7 @@ constants:
   action_weight: 10
   loss_weights: null
   loss_discount: 1
+  use_return_to_go: True
   dim_mults: [1, 4, 8]
   returns_condition: True
   predict_epsilon: True
@@ -45,7 +46,7 @@ constants:
   condition_guidance_w: 1.2
   train_only_inv: False
   clip_denoised: True
-  test_ret: 0.9
+  test_ret: 1.0
   renderer: "utils.SMACRenderer"
 
   # dataset
@@ -75,6 +76,7 @@ constants:
 
   # eval
   evaluator: "utils.MADEvaluator"
+  num_envs: 10
   num_eval: 100
   eval_freq: 100000
 
