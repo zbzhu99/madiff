@@ -14,32 +14,30 @@
 
 from setuptools import find_packages, setup
 
-setup(
-    name='OG-MARL',
-    version='0.0.2',
-    author='Claude Formanek',
-    author_email='c.formanek@instadeep.com',
-    packages=find_packages(),
-    url='https://sites.google.com/view/og-marl',
-    license='',
-    description='Off-the-Grid MARL: Datasets and Baselines for Offline \
-        Multi-Agent Reinforcement Learning',
-    long_description="",
-    install_requires=[
-        "numpy",
-        "dm_tree",
-        "tensorflow==2.8.*",
-        "tensorflow_io",
-        "tensorflow_probability==0.16.*",
-        "dm_sonnet",
-        "wandb",
-        "cpprb",
-        "absl-py",
-        "gymnasium",
-        "requests"
-    ],
-    extras_require={
-        'jax': ['flashbax', 'optax', "jax", "flax", "orbax-checkpoint"],
-    }
+dataset_requirements = [
+    "tensorflow~=2.8.0",
+    "tensorflow-io==0.27.0",
+    "dm_env",
+    "pandas",
+    "seaborn",
+    "protobuf==3.20.*",
+]
 
+baseline_requirements = ["id-mava[reverb,tf]==0.1.3", "neptune-client==0.16.2", "wandb"]
+
+setup(
+    name="OG-MARL",
+    version="0.0.1",
+    author="Anon Anonymous",
+    author_email="anon@anonymous.com",
+    packages=find_packages(),
+    url="",
+    license="",
+    description="Off-the-Grid MARL: a Framework for Dataset Generation with Baselines for Cooperative Offline Multi-Agent Reinforcement Learning",
+    long_description="",
+    install_requires=[],
+    extras_require={
+        "datasets": dataset_requirements,
+        "baselines": baseline_requirements,
+    },
 )

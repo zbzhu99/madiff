@@ -211,7 +211,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--env_name", type=str, default="smac")
     parser.add_argument("--map_name", type=str, default="3m")
-    parser.add_argument("--quality", type=int, default="Good")
+    parser.add_argument("--quality", type=str, default="Good")
     args = parser.parse_args()
 
-    main(parser.env_name, parser.map_name, parser.quality)
+    main(args.env_name, args.map_name, args.quality)

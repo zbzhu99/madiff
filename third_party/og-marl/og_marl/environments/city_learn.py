@@ -12,29 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Base wraper for Cooperative Pettingzoo environments."""
-from typing import Dict, List
+"""City Learn Environment Wrapper."""
+from typing import Any, Dict, List
 import dm_env
+from dm_env import specs
 import numpy as np
-from og_marl.environments.base import (
-    parameterized_restart,
-    BaseEnvironment,
-    OLT,
-    convert_space_to_spec,
-)
+from og_marl.environments.base import BaseEnvironment, parameterized_restart, OLT
+from citylearn.citylearn import CityLearnEnv
+from citylearn.wrappers import NormalizedObservationWrapper
 
 
-class PettingZooBase(BaseEnvironment):
-    """Environment wrapper for MARL environments."""
+class CityLearn(BaseEnvironment):
+    """Environment wrapper for City Learn environment."""
 
     def __init__(self):
-        """Constructor for parallel wrapper."""
-        self._environment = None
-        self._agents = None
+        """Constructor for CityLearn."""
+        dataset_name = "citylearn_challenge_2022_phase_all"
+        self._environment = CityLearnEnv(dataset_name)
+        self._environment = NormalizedObservationWrapper(self._environment)
+        self._agents = [
+            f"agent_{id}" for id in range(len(self._environment.action_space))
+        ]
 
-        self.num_actions = None
-        self.action_dim = None
+        self.num_agents = len(self._agents)
+        self.num_actions = self._environment.action_space[0].shape[0]
+        self.action_dim = self.num_actions
         self.max_trajectory_length = None
+        self.environment_label = "city_learn/2022_all_phases"
 
         self._reset_next_step = True
         self._done = False
@@ -52,11 +56,8 @@ class PettingZooBase(BaseEnvironment):
         self._step_type = dm_env.StepType.FIRST
 
         # Global state
-        state = self._create_state_representation(observations)
-        if state is not None:
-            extras = {"s_t": state}
-        else:
-            extras = {}
+        state = np.concatenate(observations, axis=0)
+        extras = {"s_t": state.astype("float32")}
 
         # Convert observations to OLT format
         observations = self._convert_observations(observations, self._done)
@@ -85,40 +86,21 @@ class PettingZooBase(BaseEnvironment):
         actions = self._preprocess_actions(actions)
 
         # Step the environment
-        next_observations, pz_rewards, dones, truncated, _ = self._environment.step(
-            actions
-        )
-
-        # Add zero-observations to missing agents
-        next_observations = self._add_zero_obs_for_missing_agent(next_observations)
+        next_observations, rewards_list, done, _ = self._environment.step(actions)
 
         rewards = {}
-        for agent in self._agents:
-            if agent in pz_rewards:
-                rewards[agent] = np.array(pz_rewards[agent], "float32")
-            else:
-                rewards[agent] = np.array(0, "float32")
+        for i, agent in enumerate(self._agents):
+            rewards[agent] = np.array(rewards_list[i], "float32")
 
         # Set done flag
-        self._done = all(dones.values()) or all(truncated.values())
+        self._done = done
+
+        state = np.concatenate(next_observations, axis=0).astype("float32")
+
+        next_observations = self._convert_observations(next_observations, done)
 
         # Global state
-        state = self._create_state_representation(next_observations)
-        if state is not None:
-            extras = {"s_t": state}
-        else:
-            extras = {}
-
-        # for i in range(4):
-        #     plt.imshow(state[:,:,i])
-        #     plt.savefig(f"state_{i}.png")
-
-        # Convert next observations to OLT format
-        next_observations = self._convert_observations(next_observations, self._done)
-
-        # for i, observation in enumerate(next_observations.values()):
-        #     plt.imshow(observation.observation)
-        #     plt.savefig(f"obs_{i}.png")
+        extras = {"s_t": state}
 
         if self._done:
             self._step_type = dm_env.StepType.LAST
@@ -139,16 +121,14 @@ class PettingZooBase(BaseEnvironment):
 
         return timestep, extras
 
-    def _add_zero_obs_for_missing_agent(self, observations):
-        for agent in self._agents:
-            if agent not in observations:
-                observations[agent] = np.zeros_like(
-                    self.observation_spec()[agent].observation
-                )
-        return observations
+    def render(self, mode):
+        return self._environment.render()
 
     def _preprocess_actions(self, actions):
-        return actions
+        actions_list = []
+        for agent in self._agents:
+            actions_list.append(actions[agent])
+        return actions_list
 
     def _convert_observations(self, observations: List, done: bool):
         """Convert observation so it's dm_env compatible.
@@ -160,10 +140,38 @@ class PettingZooBase(BaseEnvironment):
         Returns:
             types.Observation: dm compatible observations.
         """
-        raise NotImplementedError
+        olt_observations = {}
+        for i, agent in enumerate(self._agents):
+            obs = np.array(observations[i], "float32")
+            olt_observations[agent] = OLT(
+                observation=obs,
+                legal_actions=np.zeros((1,), "float32"),
+                terminal=np.asarray([done], dtype=np.float32),
+            )
+        return olt_observations
 
-    def _create_state_representation(self, observations):
-        raise NotImplementedError
+    def extra_spec(self) -> Dict:
+        joint_obs_shape = (
+            self._environment.observation_space[0].shape[0]
+            * len(self._environment.observation_space),
+        )
+        return {"s_t": np.zeros(joint_obs_shape, "float32")}
+
+    def observation_spec(self) -> Dict:
+        """Observation spec.
+
+        Returns:
+            types.Observation: spec for environment.
+        """
+        olt_observations = {}
+        for agent in self._agents:
+            obs = np.zeros(self._environment.observation_space[0].shape, "float32")
+            olt_observations[agent] = OLT(
+                observation=obs,
+                legal_actions=np.zeros((1,), "float32"),
+                terminal=np.asarray([False], dtype=np.float32),
+            )
+        return olt_observations
 
     def action_spec(
         self,
@@ -175,7 +183,6 @@ class PettingZooBase(BaseEnvironment):
         """
         action_specs = {}
         for agent in self._agents:
-            action_specs[agent] = convert_space_to_spec(
-                self._environment.action_space(agent)
-            )
+            action_shape = self._environment.action_space[0].shape
+            action_specs[agent] = specs.BoundedArray(action_shape, "float32", -1, 1)
         return action_specs

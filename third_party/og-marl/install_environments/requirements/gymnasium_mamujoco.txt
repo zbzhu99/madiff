@@ -1,2 +1,0 @@
-mujoco
-gymnasium_robotics
