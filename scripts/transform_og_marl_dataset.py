@@ -21,8 +21,14 @@ def main(env_name: str, map_name: str, quality: str):
             idx += 1
 
     def get_fname_idx(file_name):
-        dir_idx = sub_dir_to_idx[file_name.split("/")[-5]] * 1000
-        return dir_idx + int(file_name.split("log_")[-1].split(".")[0])
+        if env_name == "smac":
+            dir_idx = sub_dir_to_idx[file_name.split("/")[-5]] * 1000
+            return dir_idx + int(file_name.split("log_")[-1].split(".")[0])
+        elif env_name == "mamujoco":
+            dir_idx = sub_dir_to_idx[file_name.split("/")[-3]] * 1000
+            return dir_idx + int(file_name.split("/")[-1].split("log_")[-1].split(".")[0]) 
+        else:
+            raise ValueError(f"Unknown environment {env_name}")
 
     filenames = [str(file_name) for file_name in file_path.glob("**/*.tfrecord")]
     filenames = sorted(filenames, key=get_fname_idx)
