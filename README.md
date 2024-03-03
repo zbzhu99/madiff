@@ -108,8 +108,8 @@ pip install -e third_party/ddpg-agent
 3. Install off-the-grid MARL and transform the original dataset.
 
     ```bash
-    pip install -r ./third_party/og_marl/requirements.txt
-    pip install -e ./third_party/og_marl
+    pip install -r ./third_party/og-marl/install_environments/requirements/mamujoco.txt
+    pip install -e ./third_party/og-marl
     python scripts/transform_og_marl_dataset.py --env_name mamujoco --map_name <map> --quality <dataset>
     ```
 
@@ -136,8 +136,8 @@ pip install -e third_party/ddpg-agent
 4. Install off-the-grid MARL and transform the original dataset.
 
     ```bash
-    pip install -r ./third_party/og_marl/requirements.txt
-    pip install -e ./third_party/og_marl
+    pip install -r ./third_party/og-marl/install_environments/requirements/smacv1.txt
+    pip install -e ./third_party/og-marl
     python scripts/transform_og_marl_dataset.py --env_name smac --map_name <map> --quality <dataset>
     ```
 
