@@ -22,11 +22,11 @@ def main(env_name: str, map_name: str, quality: str):
 
     def get_fname_idx(file_name):
         if env_name == "smac":
-            dir_idx = sub_dir_to_idx[file_name.split("/")[-5]] * 1000
+            dir_idx = sub_dir_to_idx[file_name.split("/")[-2]] * 1000
             return dir_idx + int(file_name.split("log_")[-1].split(".")[0])
         elif env_name == "mamujoco":
-            dir_idx = sub_dir_to_idx[file_name.split("/")[-3]] * 1000
-            return dir_idx + int(file_name.split("/")[-1].split("log_")[-1].split(".")[0]) 
+            dir_idx = sub_dir_to_idx[file_name.split("/")[-2]] * 1000
+            return dir_idx + int(file_name.split("/")[-1].split("log_")[-1].split(".")[0])
         else:
             raise ValueError(f"Unknown environment {env_name}")
 
