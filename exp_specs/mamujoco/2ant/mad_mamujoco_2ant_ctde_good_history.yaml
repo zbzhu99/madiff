@@ -1,0 +1,84 @@
+meta_data:
+  exp_name: "mad_mamujoco"
+  script_path: "run_scripts/train.py"
+  num_workers: 3
+  job_name: "{dataset}/h_{horizon}-hh_{history_horizon}-{model}-r_{returns_scale}-dl_{loader}-ctde_{decentralized_execution}"
+
+variables:
+  seed: [100, 200, 300, 400, 500]
+
+  horizon: [10]
+  history_horizon: [18]
+
+  returns_scale: [380.0]
+  dataset: ["2ant-Good"]
+  condition_guidance_w: [1.2]
+
+constants:
+  # misc
+  env_type: "mamujoco"
+  n_agents: 2
+  use_action: True
+  discrete_action: False
+  residual_attn: True
+  decentralized_execution: True
+  use_zero_padding: False
+  pred_future_padding: True
+  use_ddim_sample: False
+  n_ddim_steps: 15
+
+  # model
+  model: "models.SharedConvAttentionDeconv"
+  diffusion: "models.GaussianDiffusion"
+  share_inv: True
+  n_diffusion_steps: 200
+  action_weight: 10
+  loss_weights: null
+  loss_discount: 1
+  use_return_to_go: False
+  dim_mults: [1, 4, 8]
+  returns_condition: True
+  env_ts_condition: False
+  predict_epsilon: True
+  dim: 128
+  hidden_dim: 256
+  condition_dropout: 0.25
+  condition_guidance_w: 1.2
+  train_only_inv: False
+  clip_denoised: True
+  test_ret: 1.0
+  renderer: "utils.MAMuJoCoRenderer"
+
+  # dataset
+  loader: "datasets.SequenceDataset"
+  normalizer: "CDFNormalizer"
+  max_n_episodes: 5000
+  preprocess_fns: []
+  use_padding: True
+  discount: 0.99
+  max_path_length: 1000
+  termination_penalty: 0.0
+
+  # training
+  n_steps_per_epoch: 10000
+  n_train_steps: 500000
+  batch_size: 32
+  learning_rate: 0.0002
+  gradient_accumulate_every: 2
+  ema_decay: 0.995
+  log_freq: 1000
+  save_freq: 50000
+  sample_freq: 0
+  n_saves: 5
+  save_parallel: False
+  n_reference: 3
+  save_checkpoints: True
+
+  # eval
+  evaluator: "utils.MADEvaluator"
+  num_eval: 10
+  num_envs: 10
+  eval_freq: 50000
+
+  # load checkpoint
+  continue_training: True

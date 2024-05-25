@@ -15,7 +15,8 @@
 from og_marl.environments import smac
 from og_marl.utils.dataset_utils import profile_dataset
 
-env = smac.SMAC("27m_vs_30m")  # Change SMAC Scenario Here
+# env = smac.SMAC("27m_vs_30m")  # Change SMAC Scenario Here
+env = smac.SMAC("2s3z")  # Change SMAC Scenario Here
 
 dataset = env.get_dataset("Good")  # Change Dataset Type Here
 

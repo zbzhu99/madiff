@@ -41,6 +41,9 @@ The peformances on MA-Mujoco datasets released in [off-the-grid MARL benchmark](
 | Good | 2halfcheetah | 6846 | 7025 | 1434 | **8254** | 8662 |
 | Medium | 2halfcheetah | 1627 | **2561** | 1892 | 2215 | 2221 |
 | Poor | 2halfcheetah | 465 | 736 | 384 | **751** | 767 |
+| Good | 2ant | 2697 | 2922 | 464 | **2940** | 3105 |
+| Medium | 2ant | 1145 | 744 | 799 | **1210** | 1241 |
+| Poor | 2ant | 954 | **1256** | 857 | 902 | 1037 |
 | Good | 4ant | 2802 | 2628 | 344 | **3090** | 3087 |
 | Medium | 4ant | 1617 | **1843** | 929 | 1679 | 1897 |
 | Poor | 4ant | 1033 | 1075 | 518 | **1268** | 1332 |
@@ -54,6 +57,9 @@ The peformances on SMAC datasets released in [off-the-grid MARL benchmark](https
 | Good | 3m | 16.0 | 13.8 | 18.8 | **19.6** | 19.0 | **19.6** | 20.0 |
 | Medium | 3m | 8.2 | 17.3 | 18.1 | **18.9** | 15.8 | 17.2 | 18.0 | 
 | Poor | 3m | 4.4 | 10.0 | **14.4** | 5.8 | 4.2 | 8.9 | 9.3 | 
+| Good | 2s3z | 18.2 | 5.9 | **19.6** | 19.0 | 19.3 | 19.4 | 19.5 | 
+| Medium | 2s3z | 12.3 | 5.2 | 17.2 | 14.3 | 15.9 | **17.4** | 17.7 | 
+| Poor | 2s3z | 6.7 | 3.8 | **12.1** | 10.1 | 7.0 | 9.9 | 10.8 |
 | Good | 5m6m | 16.6 | 8.0 | 16.3 | 13.8 | 16.8 | **18.0** | 18.2 | 
 | Medium | 5m6m | 12.4 | 12.0 | 15.3 | 17.0 | 16.1 | **17.5** | 18.0 | 
 | Poor | 5m6m | 7.5 | **10.7** | 9.4 | 10.4 | 7.6 | 8.9 | 9.5 |
@@ -101,6 +107,8 @@ pip install -e third_party/ddpg-agent
 
 + [2halfcheetah](https://s3.kao.instadeep.io/offline-marl-dataset/2halfcheetah.zip)
 
++ [2ant](https://s3.kao.instadeep.io/offline-marl-dataset/2ant.zip)
+
 + [4ant](https://s3.kao.instadeep.io/offline-marl-dataset/4ant.zip)
 
     The downloaded dataset should be placed under `diffuser/datasets/data/mamujoco`.
@@ -126,6 +134,8 @@ pip install -e third_party/ddpg-agent
 3. We use the SMAC dataset from [off-the-grid MARL](https://sites.google.com/view/og-marl). We preprocess the dataset to concatenate trajectories to full episodes and save them as `.npy` files for easier loading. The original dataset can be downloaded from links below.
 
 + [3m](https://s3.kao.instadeep.io/offline-marl-dataset/3m.zip)
+
++ [2s3z](https://s3.kao.instadeep.io/offline-marl-dataset/2s3z.zip)
 
 + [5m_vs_6m](https://s3.kao.instadeep.io/offline-marl-dataset/5m_vs_6m.zip)
 
