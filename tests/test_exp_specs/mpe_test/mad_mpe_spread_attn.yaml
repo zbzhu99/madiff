@@ -8,7 +8,7 @@ condition_dropout: 0.25
 condition_guidance_w: 1.2
 continue_training: true
 dataset: simple_spread-medium-replay
-diffusion: models.GaussianInvDynDiffusion
+diffusion: models.GaussianDiffusion
 dim: 128
 dim_mults:
 - 1

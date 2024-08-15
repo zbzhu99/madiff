@@ -29,7 +29,7 @@ constants:
 
   # model
   model: "models.SharedConvAttentionDeconv"
-  diffusion: "models.GaussianInvDynDiffusion"
+  diffusion: "models.GaussianDiffusion"
   share_inv: True
   n_diffusion_steps: 200
   action_weight: 10
