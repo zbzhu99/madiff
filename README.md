@@ -105,11 +105,11 @@ pip install -e third_party/ddpg-agent
 
 2. We use the MA-Mujoco dataset from [off-the-grid MARL](https://sites.google.com/view/og-marl). We preprocess the dataset to concatenate trajectories to full episodes and save them as `.npy` files for easier loading. The original dataset can be downloaded from links below.
 
-+ [2halfcheetah](https://s3.kao.instadeep.io/offline-marl-dataset/2halfcheetah.zip)
++ [2halfcheetah](https://1drv.ms/u/s!Aidqm5cK5ggRhrkM19kd-EAZYrLMTQ?e=O7axb9)
 
-+ [2ant](https://s3.kao.instadeep.io/offline-marl-dataset/2ant.zip)
++ [2ant](https://1drv.ms/u/s!Aidqm5cK5ggRhrkNVWrmX8A5Cxj-YQ?e=dadxD2)
 
-+ [4ant](https://s3.kao.instadeep.io/offline-marl-dataset/4ant.zip)
++ [4ant](https://1drv.ms/u/s!Aidqm5cK5ggRhrkOvmCvJnJVnTH_fg?e=Tm70h6)
 
     The downloaded dataset should be placed under `diffuser/datasets/data/mamujoco`.
 
@@ -133,13 +133,13 @@ pip install -e third_party/ddpg-agent
 
 3. We use the SMAC dataset from [off-the-grid MARL](https://sites.google.com/view/og-marl). We preprocess the dataset to concatenate trajectories to full episodes and save them as `.npy` files for easier loading. The original dataset can be downloaded from links below.
 
-+ [3m](https://s3.kao.instadeep.io/offline-marl-dataset/3m.zip)
++ [3m](https://1drv.ms/u/s!Aidqm5cK5ggRhrkPwet6zhtJcgGJdw?e=Ab8ke0)
 
-+ [2s3z](https://s3.kao.instadeep.io/offline-marl-dataset/2s3z.zip)
++ [2s3z](https://1drv.ms/u/s!Aidqm5cK5ggRhrkQJTxKKG-zFexNew?e=oKTP7s)
 
-+ [5m_vs_6m](https://s3.kao.instadeep.io/offline-marl-dataset/5m_vs_6m.zip)
++ [5m_vs_6m](https://1drv.ms/u/s!Aidqm5cK5ggRhrkR8lCl7PKeJPZHow?e=JLSccb)
 
-+ [8m](https://s3.kao.instadeep.io/offline-marl-dataset/8m.zip)
++ [8m](https://1drv.ms/u/s!Aidqm5cK5ggRhrkSEeqJ4FhqOQYZOA?e=VtBpob)
 
     The downloaded dataset should be placed under `diffuser/datasets/data/smac`.
 
