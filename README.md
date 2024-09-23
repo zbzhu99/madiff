@@ -139,7 +139,7 @@ pip install -e third_party/ddpg-agent
 
 + [5m_vs_6m](https://1drv.ms/u/s!Aidqm5cK5ggRhrkR8lCl7PKeJPZHow?e=JLSccb)
 
-+ [8m](https://1drv.ms/u/s!Aidqm5cK5ggRhrkSEeqJ4FhqOQYZOA?e=VtBpob)
++ [8m](https://1drv.ms/u/s!Aidqm5cK5ggRhrkZijaW25jRdlX9NQ?e=0lCFF9)
 
     The downloaded dataset should be placed under `diffuser/datasets/data/smac`.
 
