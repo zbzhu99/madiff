@@ -105,11 +105,11 @@ pip install -e third_party/ddpg-agent
 
 2. We use the MA-Mujoco dataset from [off-the-grid MARL](https://sites.google.com/view/og-marl). We preprocess the dataset to concatenate trajectories to full episodes and save them as `.npy` files for easier loading. The original dataset can be downloaded from links below.
 
-+ [2halfcheetah](https://1drv.ms/u/s!Aidqm5cK5ggRhrkM19kd-EAZYrLMTQ?e=O7axb9)
++ [2halfcheetah](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGMnAEAAAABScHDktPYWCk-vwcq6C_bGw?e=rbolgT)
 
-+ [2ant](https://1drv.ms/u/s!Aidqm5cK5ggRhrkNVWrmX8A5Cxj-YQ?e=dadxD2)
++ [2ant](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGNnAEAAAABi_kmLd7Fboa8MLY7SBgHiA?e=ywGNLW)
 
-+ [4ant](https://1drv.ms/u/s!Aidqm5cK5ggRhrkOvmCvJnJVnTH_fg?e=Tm70h6)
++ [4ant](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGOnAEAAAABR_Efk6YjTa-W8D_PxQ0M1Q?e=sWCLA4)
 
     The downloaded dataset should be placed under `diffuser/datasets/data/mamujoco`.
 
@@ -133,13 +133,13 @@ pip install -e third_party/ddpg-agent
 
 3. We use the SMAC dataset from [off-the-grid MARL](https://sites.google.com/view/og-marl). We preprocess the dataset to concatenate trajectories to full episodes and save them as `.npy` files for easier loading. The original dataset can be downloaded from links below.
 
-+ [3m](https://1drv.ms/u/s!Aidqm5cK5ggRhrkPwet6zhtJcgGJdw?e=Ab8ke0)
++ [3m](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGPnAEAAAABzGLvAWuSVbtjBuMHnpzTmw?e=egP9fj)
 
-+ [2s3z](https://1drv.ms/u/s!Aidqm5cK5ggRhrkQJTxKKG-zFexNew?e=oKTP7s)
++ [2s3z](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGQnAEAAAABIm9wn_sljEOBq29HQ0S6rg?e=Q1moyB)
 
-+ [5m_vs_6m](https://1drv.ms/u/s!Aidqm5cK5ggRhrkR8lCl7PKeJPZHow?e=JLSccb)
++ [5m_vs_6m](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGRnAEAAAABTDPmMpcdGsIBZ9lgkXiZgA?e=5mAt3I)
 
-+ [8m](https://1drv.ms/u/s!Aidqm5cK5ggRhrkZijaW25jRdlX9NQ?e=0lCFF9)
++ [8m](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGZnAEAAAABw6QDC7m5pU6AhwzYFDUyoA?e=2eCBVY)
 
     The downloaded dataset should be placed under `diffuser/datasets/data/smac`.
 
