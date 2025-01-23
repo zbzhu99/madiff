@@ -1,10 +1,11 @@
+from functools import partial
 import gym
-import numpy as np
 from gym.spaces import Box
 from gym.wrappers import TimeLimit
+import numpy as np
 
 from .multiagentenv import MultiAgentEnv
-from .obsk import build_obs, get_joints_at_kdist, get_parts_and_edges
+from .obsk import get_joints_at_kdist, get_parts_and_edges, build_obs
 
 
 # using code from https://github.com/ikostrikov/pytorch-ddpg-naf
@@ -18,11 +19,6 @@ class NormalizedActions(gym.ActionWrapper):
     def action(self, action_):
         return self._action(action_)
 
-        # orig_action = copy.deepcopy(action_)
-        # normalized_action = self._action(action_)
-        # print ('action: {}, normalized_action: {}'.format(orig_action, normalized_action))
-        # return normalized_action
-
     def _reverse_action(self, action):
         action -= self.action_space.low
         action /= self.action_space.high - self.action_space.low
@@ -31,7 +27,7 @@ class NormalizedActions(gym.ActionWrapper):
 
 
 class MujocoMulti(MultiAgentEnv):
-    def __init__(self, batch_size=None, **kwargs):
+    def __init__(self, batch_size=None, add_agent_ids_to_obs=False, **kwargs):
         super().__init__(batch_size, **kwargs)
         self.scenario = kwargs["env_args"]["scenario"]  # e.g. Ant-v2
         self.agent_conf = kwargs["env_args"]["agent_conf"]  # e.g. '2x3'
@@ -144,20 +140,41 @@ class MujocoMulti(MultiAgentEnv):
             ]
         )
 
+        self.add_agent_ids_to_obs = add_agent_ids_to_obs
+        if add_agent_ids_to_obs:
+            self.one_hot_agent_ids = []
+            for i in range(self.n_agents):
+                agent_id = np.eye(self.n_agents)[i]
+                self.one_hot_agent_ids.append(agent_id)
+            self.one_hot_agent_ids = np.stack(self.one_hot_agent_ids, axis=0)
+
+        pass
+
     def step(self, actions):
-        # need to remove dummy actions that arise due to unequal action vector sizes across agents
-        flat_actions = np.concatenate(
-            [
-                actions[i][: self.action_space[i].low.shape[0]]
-                for i in range(self.n_agents)
-            ]
+        # we need to map actions back into MuJoCo action space
+        env_actions = (
+            np.zeros(
+                (
+                    sum(
+                        [
+                            self.action_space[i].low.shape[0]
+                            for i in range(self.n_agents)
+                        ]
+                    ),
+                )
+            )
+            + np.nan
         )
+        for a, partition in enumerate(self.agent_partitions):
+            for i, body_part in enumerate(partition):
+                if env_actions[body_part.act_ids] == env_actions[body_part.act_ids]:
+                    raise Exception("FATAL: At least one env action is doubly defined!")
+                env_actions[body_part.act_ids] = actions[a][i]
 
-        # print ('flat_actions: {}'.format(flat_actions))
-        # for agent_idx in range(len(actions)):
-        #     print ('action [{}]: {} (end={}, len={})'.format(agent_idx, actions[agent_idx], self.action_space[agent_idx].low.shape[0], len(actions[agent_idx])))
+        if np.isnan(env_actions).any():
+            raise Exception("FATAL: At least one env action is undefined!")
 
-        obs_n, reward_n, done_n, info_n = self.wrapped_env.step(flat_actions)
+        obs_n, reward_n, done_n, info_n = self.wrapped_env.step(env_actions)
         self.steps += 1
 
         info = {}
@@ -174,11 +191,14 @@ class MujocoMulti(MultiAgentEnv):
         return self.get_obs(), reward_n, done_n, info
 
     def get_obs(self):
-        """Returns all agent observations in a list"""
+        """Returns all agent observat3ions in a list"""
         obs_n = []
         for a in range(self.n_agents):
             obs_n.append(self.get_obs_agent(a))
-        return np.array(obs_n)
+        obs_n = np.array(obs_n)
+        if self.add_agent_ids_to_obs:
+            obs_n = np.concatenate([self.one_hot_agent_ids, obs_n], axis=1)
+        return obs_n
 
     def get_obs_agent(self, agent_id):
         if self.agent_obsk is None:

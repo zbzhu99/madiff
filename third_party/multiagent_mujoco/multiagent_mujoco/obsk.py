@@ -1,7 +1,6 @@
 import itertools
-from copy import deepcopy
-
 import numpy as np
+from copy import deepcopy
 
 
 class Node:
@@ -24,6 +23,7 @@ class Node:
         self.extra_obs = {} if extra_obs is None else extra_obs
         self.body_fn = body_fn
         self.tendons = tendons
+        pass
 
     def __str__(self):
         return self.label
@@ -109,6 +109,7 @@ def build_obs(env, k_dict, k_categories, global_dict, global_categories, vec_len
     # if add_global_pos:
     #    obs_qpos_lst.append(global_qpos)
     #    obs_qvel_lst.append(global_qvel)
+
     body_set_dict = {}
     obs_lst = []
     # Add parts attributes
@@ -171,13 +172,6 @@ def build_obs(env, k_dict, k_categories, global_dict, global_categories, vec_len
         pad = np.array((vec_len - len(obs_lst)) * [0])
         if len(pad):
             return np.concatenate([np.array(obs_lst), pad])
-
-    # curr_s = list(env._get_obs())
-    # print ('s: {}'.format(curr_s))
-    # print ('obs: {}'.format(obs_lst))
-    # for dim in range(len(obs_lst)):
-    #     print (dim, curr_s.index(obs_lst[dim]))
-
     return np.array(obs_lst)
 
 
@@ -214,10 +208,6 @@ def get_parts_and_edges(label, partitioning):
             parts = [(bfoot, bshin, bthigh), (ffoot, fshin, fthigh)]
         elif partitioning == "6x1":
             parts = [(bfoot,), (bshin,), (bthigh,), (ffoot,), (fshin,), (fthigh,)]
-        # added by ling
-        elif partitioning == "3x2":
-            parts = [(bfoot, bshin), (bthigh, fthigh), (ffoot, fshin)]
-        # added by ling
         else:
             raise Exception("UNKNOWN partitioning config: {}".format(partitioning))
 

@@ -1,14 +1,9 @@
-```diff
-+ New Addition: Multi-Agent Mujoco now supports Scenarios with Coupled Robots (using Tendons). 
-+ Check out instructions below.
-```
+# Maintained Fork
 
-```diff
--  Please contact Christian Schroeder de Witt at cs@robots.ox.ac.uk for any questions
--  Issues? Please file them here. Thanks :)
-```
+The maintained version of these environments, which include numerous fixes, comprehensive documentation, support for installation via pip, and support for current versions of Python are available in Gymnasium Robotics (https://github.com/Farama-Foundation/Gymnasium-Robotics, https://robotics.farama.org/)
 
 # Multi-Agent Mujoco
+
 Benchmark for Continuous Multi-Agent Robotic Control, based on OpenAI's Mujoco Gym environments.
 
 <img src="https://github.com/schroederdewitt/multiagent_mujoco/blob/master/docs/images/mamujoco.jpg" width="900" height="384">
@@ -17,20 +12,20 @@ Described in the paper [Deep Multi-Agent Reinforcement Learning for Decentralize
 
 # Installation
 
-**Note: You require OpenAI Gym Version 10.8.0 and Mujoco 2.0**
+**Note: You require OpenAI Gym Version 0.10.8 and Mujoco 2.1**
 
 Simply clone this repository and put ./src on your PYTHONPATH.
 To render, please also set the following environment variables:
 
 ```
-LD_LIBRARY_PATH=${HOME}/.mujoco/mujoco200/bin;
+LD_LIBRARY_PATH=${HOME}/.mujoco/mujoco210/bin;
 LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLEW.so
 ```
 
 # Example
 
 ```python
-from src.multiagent_mujoco.mujoco_multi import MujocoMulti
+from multiagent_mujoco.mujoco_multi import MujocoMulti
 import numpy as np
 import time
 
@@ -68,6 +63,7 @@ def main():
 
             time.sleep(0.1)
             env.render()
+
 
         print("Total reward in episode {} = {}".format(e, episode_reward))
 
@@ -209,7 +205,7 @@ env_args.agent_conf="1p1"
 env_args.agent_obsk=1
 ```
 
-```CoupledHalfCheetah``` features two separate HalfCheetah agents coupled by an elastic tendon. You can add more tendons or novel coupled scenarios by 
+```CoupledHalfCheetah``` features two separate HalfCheetah agents coupled by an elastic tendon. You can add more tendons or novel coupled scenarios by
 
 1. Creating a new Gym environment to define the reward function of the coupled scenario (consult ```coupled_half_cheetah.py```)
 2. Create a new Mujoco environment XML file to insert agents and tendons (see ```assets/coupled_half_cheetah.xml```)
