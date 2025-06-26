@@ -84,7 +84,7 @@ pip install -r requirements.txt
 
 ### Setup MPE
 
-We use the MPE dataset from [OMAR](https://github.com/ling-pan/OMAR). The dataset download link and instructions can be found in OMAR's [repo](https://github.com/ling-pan/OMAR). Since their BaiduPan download links might be inconvenient for non-Chinese users, we maintain a anonymous mirror [repo](https://osf.io/jxawh/?view_only=dd3264a695af4c03bffde0350b8e8c4a) in OSF for acquiring the dataset.
+We use the MPE dataset from [OMAR](https://github.com/ling-pan/OMAR). The dataset download link and instructions can be found in OMAR's [repo](https://github.com/ling-pan/OMAR). Since their BaiduPan download links might be inconvenient for non-Chinese users, we maintain an anonymous mirror [repo](https://osf.io/jxawh/?view_only=dd3264a695af4c03bffde0350b8e8c4a) in OSF for acquiring the dataset.
 
 The downloaded dataset should be placed under `diffuser/datasets/data/mpe`.
 
@@ -103,15 +103,9 @@ pip install -e third_party/ddpg-agent
     pip install -e third_party/multiagent_mujoco
     ```
 
-2. We use the MA-Mujoco dataset from [off-the-grid MARL](https://sites.google.com/view/og-marl). We preprocess the dataset to concatenate trajectories to full episodes and save them as `.npy` files for easier loading. The original dataset can be downloaded from links below.
+2. We use the MA-Mujoco dataset from [off-the-grid MARL](https://sites.google.com/view/og-marl). We preprocess the dataset to concatenate trajectories to full episodes and save them as `.npy` files for easier loading. The original dataset can be downloaded from the Huggingface [repo](https://huggingface.co/datasets/Avada11/MADiff-Datasets).
 
-+ [2halfcheetah](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGMnAEAAAABScHDktPYWCk-vwcq6C_bGw?e=rbolgT)
-
-+ [2ant](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGNnAEAAAABi_kmLd7Fboa8MLY7SBgHiA?e=ywGNLW)
-
-+ [4ant](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGOnAEAAAABR_Efk6YjTa-W8D_PxQ0M1Q?e=sWCLA4)
-
-    The downloaded dataset should be placed under `diffuser/datasets/data/mamujoco`.
+    The downloaded dataset should be unzipped and placed under `diffuser/datasets/data/mamujoco`.
 
 3. Install off-the-grid MARL and transform the original dataset.
 
@@ -131,17 +125,9 @@ pip install -e third_party/ddpg-agent
     pip install git+https://github.com/oxwhirl/smac.git
     ```
 
-3. We use the SMAC dataset from [off-the-grid MARL](https://sites.google.com/view/og-marl). We preprocess the dataset to concatenate trajectories to full episodes and save them as `.npy` files for easier loading. The original dataset can be downloaded from links below.
+3. We use the SMAC dataset from [off-the-grid MARL](https://sites.google.com/view/og-marl). We preprocess the dataset to concatenate trajectories to full episodes and save them as `.npy` files for easier loading. The original dataset can be downloaded from the Huggingface [repo](https://huggingface.co/datasets/Avada11/MADiff-Datasets).
 
-+ [3m](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGPnAEAAAABzGLvAWuSVbtjBuMHnpzTmw?e=egP9fj)
-
-+ [2s3z](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGQnAEAAAABIm9wn_sljEOBq29HQ0S6rg?e=Q1moyB)
-
-+ [5m_vs_6m](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGRnAEAAAABTDPmMpcdGsIBZ9lgkXiZgA?e=5mAt3I)
-
-+ [8m](https://1drv.ms/u/c/1108e60a979b6a27/ESdqm5cK5ggggBGZnAEAAAABw6QDC7m5pU6AhwzYFDUyoA?e=2eCBVY)
-
-    The downloaded dataset should be placed under `diffuser/datasets/data/smac`.
+    The downloaded dataset should be unzipped and placed under `diffuser/datasets/data/smac`.
 
 4. Install off-the-grid MARL and transform the original dataset.
 
